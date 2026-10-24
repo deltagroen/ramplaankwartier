@@ -107,7 +107,7 @@ def main():
     files = sorted(glob.glob(str(C.RAW / "kadaster3d" / "volledig_*.city.json")))
     acc = {name: Acc() for name in CLASSES.values()}
     water = Acc()
-    water_faces, bridge_faces = [], []
+    water_faces, bridge_faces, road_faces = [], [], []
     stats, attr_stats = Counter(), Counter()
     for f in files:
         print("lezen", Path(f).name, flush=True)
@@ -161,6 +161,11 @@ def main():
                     ring = [[round(float(x), 2), round(float(y), 2)] for x, y in V[outer][:, :2]]
                     ring.append(ring[0])
                     bridge_faces.append({"ring": ring})
+            if t == "Road" and "rijbaan" in (a.get("bgt_functie") or "").lower():
+                for outer in rings_all:
+                    ring = [[round(float(x), 2), round(float(y), 2)] for x, y in V[outer][:, :2]]
+                    ring.append(ring[0])
+                    road_faces.append({"ring": ring})
     print("objecten in werkgebied:", dict(stats))
     print("attributen (top 30):")
     for k, v in attr_stats.most_common(30):
@@ -168,6 +173,7 @@ def main():
 
     (C.WORK / "water_faces.json").write_text(json.dumps(water_faces))
     (C.WORK / "bridge_faces.json").write_text(json.dumps(bridge_faces))
+    (C.WORK / "road_faces.json").write_text(json.dumps(road_faces))
 
     w = GLBWriter()
     arr = water.arrays()

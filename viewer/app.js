@@ -371,8 +371,20 @@ function stepFly(dt) {
 }
 $('#btnOverzicht').addEventListener('click', () => flyTo(HOME.target, HOME.pos));
 
-// ---------- dag afspelen: zon van opkomst tot ondergang met een vlucht door de wijk ----------
-const DAY = { playing: false, p: 0, duration: 100, start: null, end: null, pos: null, tgt: null, knots: null };
+// ---------- dag afspelen: zon van opkomst tot ondergang met een willekeurige, botsingsvrije vlucht ----------
+const DAY = { playing: false, p: 0, duration: 110, start: null, end: null, N: 2400, P: null, T: null, knots: null,
+              panelWasCollapsed: false, street: null };
+let SM = null, SARR = null, STREETS = [];
+const rnd = (a, b) => a + Math.random() * (b - a);
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+function surfaceMax(x, z, r = 6) {   // hoogste punt (gebouw, boom, mast) binnen r m, uit het 4 m-oppervlaktegrid
+  if (!SM) return groundHeight(x, z);
+  const i0 = Math.max(0, Math.floor((x - r - SM.x0) / SM.dx)), i1 = Math.min(SM.nx - 1, Math.floor((x + r - SM.x0) / SM.dx));
+  const j0 = Math.max(0, Math.floor((SM.z_south - (z + r)) / SM.dx)), j1 = Math.min(SM.ny - 1, Math.floor((SM.z_south - (z - r)) / SM.dx));
+  let m = -1;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) m = Math.max(m, SARR[j * SM.nx + i]);
+  return m < 0 ? groundHeight(x, z) : SM.hmin + m * SM.scale;
+}
 function sunDirAt(date, elev) {
   const q = SunCalc.getPosition(date, lat, lon);
   const ca = Math.cos(elev);
@@ -383,30 +395,111 @@ function buildDay(date) {
   DAY.start = new Date(t.sunrise.getTime() - 20 * 60000);
   DAY.end = new Date(t.sunset.getTime() + 20 * 60000);
   const rise = sunDirAt(t.sunrise, 0.03), set = sunDirAt(t.sunset, 0.025);
-  const V = (x, y, z) => new THREE.Vector3(x, y, z);
-  const riseCam = V(-560, 60, 160), setCam = V(520, 90, -120), endCam = V(470, 95, -180);
-  // [voortgang 0..1, camerapositie, kijkpunt]; lokaal stelsel x = oost, y = omhoog, z = zuid
-  const keys = [
-    [0.000, V(5, 900, 10), V(5, 0, -60)],                                   // recht boven de wijk, noorden boven
-    [0.040, V(-300, 380, 220), V(20, 0, -60)],                               // kantelt naar schuin
-    [0.075, riseCam, riseCam.clone().addScaledVector(rise, 700)],            // zonsopkomst achter de wijk
-    [0.130, V(-520, 50, 260), V(-200, 15, 60)],
-    [0.220, V(-300, 40, 330), V(60, 10, 160)],                               // zuidwest, laag, richting oost
-    [0.310, V(60, 45, 360), V(300, 10, 60)],
-    [0.400, V(430, 80, 200), V(150, 10, -120)],                              // zuidoost, bocht naar het noorden
-    [0.490, V(460, 150, -120), V(0, 10, -60)],                               // oostkant hoog, kijkt over de wijk
-    [0.570, V(260, 110, -360), V(-150, 10, -120)],
-    [0.650, V(-120, 60, -400), V(-220, 10, 40)],                             // noordrand, richting west
-    [0.720, V(-430, 65, -220), V(-160, 10, 120)],                            // westkant, richting zuid
-    [0.790, V(-330, 40, 300), V(120, 10, 220)],
-    [0.860, V(120, 70, 390), V(420, 12, 120)],                               // zuidrand, klimmend naar het oosten
-    [0.920, V(520, 110, 60), V(300, 20, -260)],                              // draait naar het westen
-    [0.955, setCam, setCam.clone().addScaledVector(set, 700)],               // zonsondergang over de wijk
-    [1.000, endCam, endCam.clone().addScaledVector(set, 700)],
-  ];
-  DAY.knots = keys.map((k) => k[0]);
-  DAY.pos = new THREE.CatmullRomCurve3(keys.map((k) => k[1]), false, 'centripetal', 0.5);
-  DAY.tgt = new THREE.CatmullRomCurve3(keys.map((k) => k[2]), false, 'centripetal', 0.5);
+  const C = V3(5, 0, -27);                                   // middelpunt van de buurt (lokaal: x oost, z zuid)
+  const keys = [];
+  // Vast begin: recht boven de wijk, kantelen, zonsopkomst vanaf de westkant
+  const riseCam = V3(rnd(-600, -480), rnd(55, 85), rnd(40, 260));
+  keys.push({ p: 0.000, pos: V3(5, 900, 10), tgt: V3(5, 0, -60) });
+  keys.push({ p: 0.040, pos: V3(-300, 380, 220), tgt: V3(20, 0, -60) });
+  keys.push({ p: 0.075, pos: riseCam, tgt: riseCam.clone().addScaledVector(rise, 700) });
+  // Willekeurige lus: van west naar oost, anderhalve ronde om en door de wijk op wisselende hoogtes
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  const n = 4 + Math.floor(Math.random() * 3);
+  const a0 = Math.atan2(riseCam.z - C.z, riseCam.x - C.x);
+  const total = Math.PI * rnd(2.7, 3.3);
+  const randTgt = () => V3(rnd(-300, 300), rnd(5, 25), rnd(-260, 200));
+  const tour = [];
+  for (let i = 1; i <= n; i++) {
+    const ang = a0 + dir * total * (i / (n + 1));
+    const r = rnd(230, 470);
+    tour.push({ pos: V3(C.x + Math.cos(ang) * r, rnd(45, 190), C.z + Math.sin(ang) * r), tgt: randTgt(), w: 1, ang });
+  }
+  // Eén korte lage pas door een straatcorridor (uit streets.json), ingevoegd waar de lus er het dichtst bij komt
+  DAY.street = null;
+  const inside = (q, m) => q[0] > -424 - m && q[0] < 433 + m && q[2] > -381 - m && q[2] < 328 + m;
+  const cands = STREETS.filter((s) => [s.a, s.b].every((q) => inside(q, s.type === 'water' ? 200 : 40)));
+  if (cands.length) {
+    const s = cands[Math.floor(Math.random() * cands.length)];
+    const flip = Math.random() < 0.5;
+    const A = V3(...(flip ? s.b : s.a)), B = V3(...(flip ? s.a : s.b));
+    const ab = B.clone().sub(A);
+    const L = ab.length();
+    const d = ab.clone().normalize();
+    const mid = A.clone().addScaledVector(d, L / 2);
+    const angM = Math.atan2(mid.z - C.z, mid.x - C.x);
+    let best = 0, bestD = Infinity;
+    tour.forEach((w, i) => { const dd = Math.abs(Math.atan2(Math.sin(w.ang - angM), Math.cos(w.ang - angM))); if (dd < bestD) { bestD = dd; best = i; } });
+    const at = (f, h) => { const q = A.clone().addScaledVector(d, L * f); q.y = groundHeight(q.x, q.z) + h; return q; };
+    const ahead = at(1.0, 6), beyond = B.clone().addScaledVector(d, 150); beyond.y = groundHeight(beyond.x, beyond.z) + 12;
+    const pass = [
+      { pos: at(0.0, 20), tgt: ahead, w: 1.5, street: true },
+      { pos: at(0.25, 8), tgt: ahead, w: 2, street: true },
+      { pos: at(0.75, 8), tgt: beyond, w: 2, street: true },
+      { pos: at(1.0, 20), tgt: beyond, w: 1.5, street: true },
+    ];
+    tour.splice(best + 1, 0, ...pass);
+    DAY.street = { A, B, d, L };
+  }
+  // Vast einde: zonsondergang vanaf de oostkant, kijkend over de wijk
+  const setCam = V3(rnd(440, 560), rnd(90, 130), rnd(-160, 100));
+  const setTgt = setCam.clone().addScaledVector(set, 700);
+  const endCam = setCam.clone().add(V3(-40, 6, -50));
+  // Tijdverdeling: vertrek bij 0.13, vaste momenten voor zonsopkomst (0.075) en -ondergang (0.955); daartussen
+  // naar rato van de afgelegde afstand (gewicht w maakt de straatpas langzamer).
+  const depart = riseCam.clone().lerp(tour[0].pos, 0.12); depart.y = riseCam.y + 5;
+  const moving = [{ pos: depart, tgt: riseCam.clone().addScaledVector(rise, 700).lerp(tour[0].tgt, 0.3), w: 1 }, ...tour,
+                  { pos: setCam, tgt: setTgt, w: 1 }];
+  const dist = [0];
+  for (let i = 1; i < moving.length; i++) dist.push(dist[i - 1] + moving[i].pos.distanceTo(moving[i - 1].pos) * (moving[i].w || 1));
+  const span = dist[dist.length - 1];
+  moving.forEach((k, i) => keys.push({ p: 0.13 + (0.955 - 0.13) * dist[i] / span, pos: k.pos, tgt: k.tgt, street: !!k.street }));
+  const streetP = keys.filter((k) => k.street).map((k) => k.p);
+  const pIn = streetP.length ? Math.min(...streetP) - 0.01 : 2, pOut = streetP.length ? Math.max(...streetP) + 0.01 : -1;
+  keys.push({ p: 1.0, pos: endCam, tgt: endCam.clone().addScaledVector(set, 700) });
+  DAY.knots = keys.map((k) => k.p);
+  const posCurve = new THREE.CatmullRomCurve3(keys.map((k) => k.pos), false, 'centripetal', 0.5);
+  const tgtCurve = new THREE.CatmullRomCurve3(keys.map((k) => k.tgt), false, 'centripetal', 0.5);
+  // Dicht bemonsteren en de hoogte botsingsvrij maken: minstens 12 m boven het hoogste object binnen 6 m,
+  // behalve in de straatcorridor (8 m boven de weg, met op- en afrit in het eerste en laatste kwart).
+  const N = DAY.N, P = new Float32Array(N * 3), T = new Float32Array(N * 3), req = new Float32Array(N);
+  const q = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    const u = dayU(i / (N - 1));
+    posCurve.getPoint(u, q); P[i * 3] = q.x; P[i * 3 + 1] = q.y; P[i * 3 + 2] = q.z;
+    tgtCurve.getPoint(u, q); T[i * 3] = q.x; T[i * 3 + 1] = q.y; T[i * 3 + 2] = q.z;
+    req[i] = surfaceMax(P[i * 3], P[i * 3 + 2], 6) + 12;
+  }
+  const smooth = (arr, k, op) => {            // lopend maximum of gemiddelde over +-k monsters
+    const out = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      let m = op === 'max' ? -Infinity : 0, c = 0;
+      for (let j = Math.max(0, i - k); j <= Math.min(arr.length - 1, i + k); j++) { if (op === 'max') m = Math.max(m, arr[j]); else { m += arr[j]; c++; } }
+      out[i] = op === 'max' ? m : m / c;
+    }
+    return out;
+  };
+  let need = smooth(smooth(req, 20, 'max'), 25, 'avg');
+  const inStreet = new Uint8Array(N);
+  if (DAY.street) {
+    const { A, d, L } = DAY.street;
+    for (let i = 0; i < N; i++) {
+      const pi = i / (N - 1);
+      if (pi < pIn || pi > pOut) continue;          // alleen het stuk van de vlucht dat de straatpas is
+      const dx = P[i * 3] - A.x, dz = P[i * 3 + 2] - A.z;
+      const along = dx * d.x + dz * d.z, lat = Math.abs(dx * d.z - dz * d.x);
+      const f = along / L;
+      if (f >= 0 && f <= 1 && lat < 6) {
+        const ramp = Math.max(0, 1 - Math.min(f, 1 - f) / 0.25);
+        need[i] = groundHeight(P[i * 3], P[i * 3 + 2]) + 8 + 14 * ramp * ramp;
+        inStreet[i] = 1;
+      }
+    }
+  }
+  const y0 = new Float32Array(N);
+  for (let i = 0; i < N; i++) y0[i] = Math.max(P[i * 3 + 1], need[i]);
+  const y1 = smooth(y0, 12, 'avg');
+  for (let i = 0; i < N; i++) P[i * 3 + 1] = inStreet[i] ? need[i] : Math.max(y1[i], need[i]);
+  DAY.P = P; DAY.T = T;
 }
 function dayU(p) {   // voortgang -> curveparameter, zodat de sleutelmomenten precies op hun tijd vallen
   const k = DAY.knots, n = k.length - 1;
@@ -418,9 +511,10 @@ function dayU(p) {   // voortgang -> curveparameter, zodat de sleutelmomenten pr
 const dayPos = new THREE.Vector3(), dayTgt = new THREE.Vector3();
 function setDayProgress(p) {
   DAY.p = THREE.MathUtils.clamp(p, 0, 1);
-  const u = dayU(DAY.p);
-  DAY.pos.getPoint(u, dayPos);
-  DAY.tgt.getPoint(u, dayTgt);
+  const f = DAY.p * (DAY.N - 1), i = Math.min(DAY.N - 2, Math.floor(f)), s = f - i;
+  const P = DAY.P, T = DAY.T;
+  dayPos.set(P[i * 3] * (1 - s) + P[(i + 1) * 3] * s, P[i * 3 + 1] * (1 - s) + P[(i + 1) * 3 + 1] * s, P[i * 3 + 2] * (1 - s) + P[(i + 1) * 3 + 2] * s);
+  dayTgt.set(T[i * 3] * (1 - s) + T[(i + 1) * 3] * s, T[i * 3 + 1] * (1 - s) + T[(i + 1) * 3 + 1] * s, T[i * 3 + 2] * (1 - s) + T[(i + 1) * 3 + 2] * s);
   camera.position.copy(dayPos);
   camera.lookAt(dayTgt);
   const when = new Date(DAY.start.getTime() + DAY.p * (DAY.end - DAY.start));
@@ -434,6 +528,9 @@ function startDay() {
   buildDay($('#sundate').value ? new Date($('#sundate').value + 'T12:00:00') : new Date());
   DAY.playing = true;
   controls.enabled = false;
+  DAY.panelWasCollapsed = $('#panel').classList.contains('collapsed');
+  $('#panel').classList.add('collapsed');
+  $('#collapse').textContent = '+';
   $('#dayplay').innerHTML = '&#x25A0; Stop';
   setDayProgress(0);
 }
@@ -443,6 +540,7 @@ function stopDay() {
   controls.enabled = true;
   controls.target.copy(dayTgt);
   controls.update();
+  if (!DAY.panelWasCollapsed) { $('#panel').classList.remove('collapsed'); $('#collapse').textContent = '–'; }
   $('#dayplay').innerHTML = '&#x25B6; Dag afspelen';
 }
 function stepDay(dt) {
@@ -571,10 +669,11 @@ const clock = new THREE.Clock();
 let frames = 0, fpsT = 0;
 function updateLabels() {
   const on = state.layers.labels;
-  const maxD = state.walking ? 250 : DAY.playing ? 350 : 800;
+  const maxD = state.walking ? 250 : 800;
   const best = new Map();   // per naam het dichtstbijzijnde label
   for (const l of labelObjs) {
     l.visible = false;
+    if (DAY.playing) continue;                 // tijdens het vliegen geen straatnamen
     const d = camera.position.distanceTo(l.position);
     if (!on || d > maxD) continue;
     const b = best.get(l.userData.name);
@@ -618,6 +717,9 @@ async function init() {
   [lon, lat] = meta.origin_lonlat;
   HM = meta.heights;
   HARR = new Uint16Array(await (await fetch(MODEL + 'heights_2m.u16')).arrayBuffer());
+  SM = meta.surface || null;
+  if (SM) SARR = new Uint16Array(await (await fetch(MODEL + 'surface_4m.u16')).arrayBuffer());
+  STREETS = await fetchJSON(MODEL + 'streets.json').catch(() => []);
   const s = meta.stats || {};
   $('#stats').textContent = `${s.gebouwen ?? '?'} panden · ${(s.bomen_bgt || 0) + (s.bomen_gedetecteerd || 0)} bomen · model van ${(meta.gebouwd || '').slice(0, 10)}`;
   sunNow(true);
@@ -636,7 +738,7 @@ async function init() {
   animate();
   startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax };
 
 init().catch((e) => {
   console.error(e);

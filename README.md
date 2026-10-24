@@ -30,8 +30,12 @@ De map `viewer/` is zelfstandig: kopieer die map naar een andere computer of zet
 (bijv. GitHub Pages) en hij werkt zonder verdere installatie. Omvang circa 30 MB.
 
 Bij het openen wordt de dag afgespeeld: de camera begint recht boven de wijk vlak voor zonsopkomst, kantelt naar
-de opkomende zon, vliegt een lus door de wijk op wisselende hoogtes terwijl de zon zijn baan aflegt, en eindigt
-vanaf de oostkant kijkend naar de ondergaande zon (circa 100 seconden, datum uit het datumveld). Elke muis- of
+de opkomende zon, vliegt een lus om en door de wijk op wisselende hoogtes terwijl de zon zijn baan aflegt, en
+eindigt vanaf de oostkant kijkend naar de ondergaande zon (circa 110 seconden, datum uit het datumveld). De lus
+wordt elke keer willekeurig gegenereerd; begin- en eindpunt liggen vast. De baan blijft minstens 12 m boven het
+hoogste object binnen 6 m (gebouwen, bomen, masten, uit een 4 m-oppervlaktegrid van het DSM), met één korte lage pas
+op 8 m door een rechte straat of over een brede watergang zonder obstakels binnen 3,5 m (`model/streets.json`,
+berekend in `build_misc.py`). Tijdens het vliegen zijn het paneel ingeklapt en de straatnamen uit. Elke muis- of
 toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het opnieuw.
 
 Bediening: slepen = verschuiven, draaien = rechter muisknop, Ctrl/Shift+slepen, twee vingers op een trackpad,

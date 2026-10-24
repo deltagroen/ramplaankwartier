@@ -1,6 +1,6 @@
 {
  "naam": "Ramplaankwartier 3D",
- "gebouwd": "2026-10-25T00:04",
+ "gebouwd": "2026-10-25T01:40",
  "origin_rd": [
   101800.0,
   488600.0
@@ -36,6 +36,15 @@
   "x0": -700.0,
   "z_south": 600.0,
   "note": "rij 0 = zuidrand (z_south), rijen lopen naar het noorden (z neemt af); kolom 0 = westrand (x0)"
+ },
+ "surface": {
+  "nx": 350,
+  "ny": 300,
+  "dx": 4.0,
+  "hmin": -1.0,
+  "scale": 0.01,
+  "x0": -700.0,
+  "z_south": 600.0
  },
  "stats": {
   "gebouwen": 2730,
