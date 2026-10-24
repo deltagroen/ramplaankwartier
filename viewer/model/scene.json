@@ -1,0 +1,72 @@
+{
+ "naam": "Ramplaankwartier 3D",
+ "gebouwd": "2026-10-25T00:04",
+ "origin_rd": [
+  101800.0,
+  488600.0
+ ],
+ "origin_lonlat": [
+  4.605818,
+  52.382681
+ ],
+ "aoi_rd": [
+  101100.0,
+  488000.0,
+  102500.0,
+  489200.0
+ ],
+ "aoi_local": {
+  "xmin": -700.0,
+  "xmax": 700.0,
+  "zmin": -600.0,
+  "zmax": 600.0
+ },
+ "patches": {
+  "nx": 4,
+  "ny": 4,
+  "tex": "tex",
+  "tex_hd": "tex_hd"
+ },
+ "heights": {
+  "nx": 701,
+  "ny": 601,
+  "dx": 2.0,
+  "hmin": -2.0,
+  "scale": 0.01,
+  "x0": -700.0,
+  "z_south": 600.0,
+  "note": "rij 0 = zuidrand (z_south), rijen lopen naar het noorden (z neemt af); kolom 0 = westrand (x0)"
+ },
+ "stats": {
+  "gebouwen": 2730,
+  "bomen_bgt": 1191,
+  "bomen_gedetecteerd": 6491
+ },
+ "bronnen": [
+  {
+   "naam": "AHN (actuele versie, DTM/DSM 0,5 m via PDOK WCS)",
+   "licentie": "CC0 / CC BY 4.0",
+   "url": "https://www.ahn.nl"
+  },
+  {
+   "naam": "Luchtfoto Beeldmateriaal Nederland 2026_orthoHR (PDOK WMS)",
+   "licentie": "CC BY 4.0",
+   "url": "https://www.beeldmateriaal.nl"
+  },
+  {
+   "naam": "Kadaster 3D Basisvoorziening 2025 (gebouwen LoD 2.2, terrein, water)",
+   "licentie": "CC BY 4.0",
+   "url": "https://www.kadaster.nl/zakelijk/producten/geo-informatie/3d-basisvoorziening"
+  },
+  {
+   "naam": "BGT (boompunten, straatnaamlabels) via PDOK",
+   "licentie": "CC0",
+   "url": "https://www.pdok.nl/introductie/-/article/basisregistratie-grootschalige-topografie-bgt-"
+  },
+  {
+   "naam": "CBS Wijken en Buurten 2025 (buurtgrens)",
+   "licentie": "CC BY 4.0",
+   "url": "https://www.cbs.nl"
+  }
+ ]
+}

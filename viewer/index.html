@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ramplaankwartier 3D</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./lib/three/build/three.module.js", "three/addons/": "./lib/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="overlay">
+  <div class="box">
+    <h1>Ramplaankwartier 3D</h1>
+    <p id="progress">Model laden…</p>
+    <div class="bar"><div id="barfill"></div></div>
+    <p class="hint">Slepen: verschuiven · rechter muisknop of Ctrl+slepen: draaien · scrollen: zoomen<br>
+       Draaien kan ook met <b>Q</b>/<b>E</b> of de knoppen in het paneel · klik op een pand voor BAG-gegevens</p>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="head">
+    <strong>Ramplaankwartier 3D</strong>
+    <button id="collapse" title="Paneel in-/uitklappen">–</button>
+  </div>
+  <div id="panelbody">
+    <div id="stats" class="muted"></div>
+    <h3>Lagen</h3>
+    <label><input type="checkbox" data-layer="gebouwen" checked> Gebouwen</label>
+    <label><input type="checkbox" data-layer="bomen" checked> Bomen</label>
+    <label><input type="checkbox" data-layer="water" checked> Water</label>
+    <label><input type="checkbox" data-layer="buurtgrens" checked> Buurtgrens</label>
+    <label><input type="checkbox" data-layer="labels" checked> Straatnamen</label>
+    <label><input type="checkbox" data-layer="maquette"> BGT-maquette (wegen, groen) i.p.v. luchtfoto</label>
+    <label><input type="checkbox" data-layer="bouwjaar"> Kleur panden op bouwjaar</label>
+    <label><input type="checkbox" data-layer="schaduw" checked> Schaduwen</label>
+    <label><input type="checkbox" data-layer="hd"> HD-luchtfoto (meer geheugen)</label>
+    <div id="legend" class="hidden">
+      <span style="--c:#7b1e1e">&lt; 1900</span><span style="--c:#c0392b">1900–1929</span><span style="--c:#e67e22">1930–1944</span>
+      <span style="--c:#f1c40f">1945–1969</span><span style="--c:#2ecc71">1970–1989</span><span style="--c:#1abc9c">1990–2009</span>
+      <span style="--c:#3498db">≥ 2010</span><span style="--c:#999">onbekend</span>
+    </div>
+    <h3>Zon en schaduw</h3>
+    <div class="row"><input type="date" id="sundate"> <button id="sunnow" title="Huidige datum en tijd">Nu</button></div>
+    <div class="row"><input type="range" id="suntime" min="0" max="1439" step="5"> <span id="sunlabel"></span></div>
+    <h3>Navigatie</h3>
+    <div class="row">
+      <button id="btnOverzicht" title="Terug naar het overzicht (O)">Overzicht</button>
+      <button id="btnWalk" title="Rondlopen op ooghoogte (W)">Wandelen</button>
+    </div>
+    <div class="row rot">
+      <button id="rotL" title="Draai linksom (Q), ingedrukt houden draait door">&#x27F2;</button>
+      <button id="rotR" title="Draai rechtsom (E), ingedrukt houden draait door">&#x27F3;</button>
+      <button id="tiltUp" title="Meer van boven (R)">&#x25B2;</button>
+      <button id="tiltDown" title="Meer van opzij (F)">&#x25BC;</button>
+      <button id="north" title="Noorden boven">N &#x2191;</button>
+    </div>
+    <div class="row"><select id="streets"><option value="">Ga naar straat…</option></select></div>
+    <p class="muted small">Draaien: rechter muisknop of <b>Ctrl</b>/<b>Shift</b>+slepen (trackpad: twee vingers slepen),
+      toetsen <b>Q</b>/<b>E</b>, of de knoppen. Pijltjestoetsen verschuiven. Klik op het kompas voor noorden boven.<br>
+      Wandelen: muis kijkt rond, <b>WASD</b>/pijltjes lopen, <b>Shift</b> rennen, <b>Esc</b> stopt.</p>
+  </div>
+</div>
+
+<div id="compass" title="Noorden"><div id="needle">N</div></div>
+<div id="info" class="hidden"></div>
+<div id="attrib">Bronnen: AHN · Kadaster 3D Basisvoorziening 2025 (CC BY 4.0) · Luchtfoto Beeldmateriaal NL (CC BY 4.0) · BGT · CBS &nbsp;|&nbsp; <span id="perf"></span></div>
+
+<script src="./lib/suncalc/suncalc.js"></script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

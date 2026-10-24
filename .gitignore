@@ -1,0 +1,8 @@
+data/raw/
+data/work/
+viewer/model/tex/
+node_modules/
+__pycache__/
+.DS_Store
+.env
+.claude/
