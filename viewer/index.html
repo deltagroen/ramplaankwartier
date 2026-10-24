@@ -18,6 +18,7 @@
     <p id="progress">Model laden…</p>
     <div class="bar"><div id="barfill"></div></div>
     <p class="hint">Slepen: verschuiven · rechter muisknop of Ctrl+slepen: draaien · scrollen: zoomen<br>
+       De dag wordt automatisch afgespeeld: klik of sleep om zelf rond te kijken, <b>&#x25B6;</b> speelt hem opnieuw af.<br>
        Draaien kan ook met <b>Q</b>/<b>E</b> of de knoppen in het paneel · klik op een pand voor BAG-gegevens</p>
   </div>
 </div>
@@ -38,14 +39,14 @@
     <label><input type="checkbox" data-layer="maquette"> BGT-maquette (wegen, groen) i.p.v. luchtfoto</label>
     <label><input type="checkbox" data-layer="bouwjaar"> Kleur panden op bouwjaar</label>
     <label><input type="checkbox" data-layer="schaduw" checked> Schaduwen</label>
-    <label><input type="checkbox" data-layer="hd"> HD-luchtfoto (meer geheugen)</label>
     <div id="legend" class="hidden">
       <span style="--c:#7b1e1e">&lt; 1900</span><span style="--c:#c0392b">1900–1929</span><span style="--c:#e67e22">1930–1944</span>
       <span style="--c:#f1c40f">1945–1969</span><span style="--c:#2ecc71">1970–1989</span><span style="--c:#1abc9c">1990–2009</span>
       <span style="--c:#3498db">≥ 2010</span><span style="--c:#999">onbekend</span>
     </div>
     <h3>Zon en schaduw</h3>
-    <div class="row"><input type="date" id="sundate"> <button id="sunnow" title="Huidige datum en tijd">Nu</button></div>
+    <div class="row"><input type="date" id="sundate"> <button id="sunnow" title="Huidige datum en tijd">Nu</button>
+      <button id="dayplay" title="Speel de dag af van zonsopkomst tot zonsondergang (spatiebalk)">&#x25B6; Dag afspelen</button></div>
     <div class="row"><input type="range" id="suntime" min="0" max="1439" step="5"> <span id="sunlabel"></span></div>
     <h3>Navigatie</h3>
     <div class="row">

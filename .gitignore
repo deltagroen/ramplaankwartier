@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 .env
 .claude/
+viewer/model/tex_hd/

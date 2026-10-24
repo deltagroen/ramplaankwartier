@@ -25,11 +25,13 @@ def main():
             if canvas.getextrema() == ((255, 255), (255, 255), (255, 255)):
                 raise RuntimeError(f"patch p{i}{j}: luchtfoto leeg (wit) - controleer WMS_LAYER/WMS_GSD")
             for size, folder in ((C.TEX_STD, "tex"), (C.TEX_HD, "tex_hd")):
+                if not size:
+                    continue
+                (C.MODEL / folder).mkdir(parents=True, exist_ok=True)
                 img = canvas.resize((size, size), Image.LANCZOS)
                 out = C.MODEL / folder / f"p{i}{j}.webp"
                 img.save(out, "WEBP", quality=C.WEBP_QUALITY, method=4)
-            print(f"p{i}{j}: {(C.MODEL/'tex'/f'p{i}{j}.webp').stat().st_size/1e6:.2f} MB std, "
-                  f"{(C.MODEL/'tex_hd'/f'p{i}{j}.webp').stat().st_size/1e6:.2f} MB hd", flush=True)
+            print(f"p{i}{j}: {(C.MODEL/'tex'/f'p{i}{j}.webp').stat().st_size/1e6:.2f} MB", flush=True)
 
 
 if __name__ == "__main__":

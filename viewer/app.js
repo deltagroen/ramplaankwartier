@@ -11,7 +11,7 @@ const $ = (s) => document.querySelector(s);
 
 const state = {
   layers: { gebouwen: true, bomen: true, water: true, buurtgrens: true, labels: true, maquette: false,
-            bouwjaar: false, schaduw: true, hd: false },
+            bouwjaar: false, schaduw: true },
   walking: false, selected: null, flying: null,
 };
 
@@ -104,8 +104,8 @@ function setSun(date) {
   su.sunPosition.value.copy(dir);
   const day = THREE.MathUtils.smoothstep(p.altitude, -0.06, 0.12);
   sun.intensity = 3.2 * day;
-  hemi.intensity = 0.35 + 0.7 * day;
-  renderer.toneMappingExposure = 0.3 + 0.3 * day;
+  hemi.intensity = 0.45 + 0.6 * day;
+  renderer.toneMappingExposure = 0.36 + 0.24 * day;
   sun.castShadow = state.layers.schaduw && day > 0.05;
   const hh = String(date.getHours()).padStart(2, '0'), mm = String(date.getMinutes()).padStart(2, '0');
   $('#sunlabel').textContent = `${hh}:${mm} · zon ${(p.altitude * 180 / Math.PI).toFixed(0)}°`;
@@ -152,7 +152,6 @@ const terrainMeshes = [];
 const plainMat = new THREE.MeshStandardMaterial({ color: 0xcfc8b8, roughness: 1 });
 let bMesh = null, bInfo = [], bCSR = null, bOrig = null, bidAttr = null, colAttr = null, roofAttr = null;
 let labelObjs = [];
-const texLoader = new THREE.TextureLoader();
 
 function setupTerrain(root) {
   root.traverse((o) => {
@@ -330,20 +329,6 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 });
 
 // ---------- lagen ----------
-function setHD(on) {
-  for (const mesh of terrainMeshes) {
-    const mat = mesh.userData.photoMat;
-    if (on) {
-      if (mesh.userData.hdMap) { mat.map = mesh.userData.hdMap; mat.needsUpdate = true; }
-      else texLoader.load(`${MODEL}tex_hd/${mesh.name}.webp`, (tex) => {
-        tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = maxAniso;
-        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-        mesh.userData.hdMap = tex;
-        if (state.layers.hd) { mat.map = tex; mat.needsUpdate = true; }
-      });
-    } else { mat.map = mesh.userData.stdMap; mat.needsUpdate = true; }
-  }
-}
 function setLayer(name, on) {
   state.layers[name] = on;
   switch (name) {
@@ -357,7 +342,6 @@ function setLayer(name, on) {
       break;
     case 'bouwjaar': $('#legend').classList.toggle('hidden', !on); if (bMesh) repaintAll(); break;
     case 'schaduw': setSun(currentSunDate()); break;
-    case 'hd': setHD(on); break;
     default: break;
   }
 }
@@ -372,6 +356,7 @@ $('#collapse').addEventListener('click', () => {
 
 // ---------- navigatie: vliegen, wandelen ----------
 function flyTo(target, pos, dur = 1.4) {
+  stopDay();
   state.flying = { t: 0, dur, p0: camera.position.clone(), t0: controls.target.clone(), p1: pos.clone(), t1: target.clone() };
   controls.enabled = false;
 }
@@ -385,6 +370,91 @@ function stepFly(dt) {
   if (f.t >= f.dur) { state.flying = null; controls.enabled = true; controls.update(); }
 }
 $('#btnOverzicht').addEventListener('click', () => flyTo(HOME.target, HOME.pos));
+
+// ---------- dag afspelen: zon van opkomst tot ondergang met een vlucht door de wijk ----------
+const DAY = { playing: false, p: 0, duration: 100, start: null, end: null, pos: null, tgt: null, knots: null };
+function sunDirAt(date, elev) {
+  const q = SunCalc.getPosition(date, lat, lon);
+  const ca = Math.cos(elev);
+  return new THREE.Vector3(-Math.sin(q.azimuth) * ca, Math.sin(elev), Math.cos(q.azimuth) * ca);
+}
+function buildDay(date) {
+  const t = SunCalc.getTimes(date, lat, lon);
+  DAY.start = new Date(t.sunrise.getTime() - 20 * 60000);
+  DAY.end = new Date(t.sunset.getTime() + 20 * 60000);
+  const rise = sunDirAt(t.sunrise, 0.03), set = sunDirAt(t.sunset, 0.025);
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const riseCam = V(-560, 60, 160), setCam = V(520, 90, -120), endCam = V(470, 95, -180);
+  // [voortgang 0..1, camerapositie, kijkpunt]; lokaal stelsel x = oost, y = omhoog, z = zuid
+  const keys = [
+    [0.000, V(5, 900, 10), V(5, 0, -60)],                                   // recht boven de wijk, noorden boven
+    [0.040, V(-300, 380, 220), V(20, 0, -60)],                               // kantelt naar schuin
+    [0.075, riseCam, riseCam.clone().addScaledVector(rise, 700)],            // zonsopkomst achter de wijk
+    [0.130, V(-520, 50, 260), V(-200, 15, 60)],
+    [0.220, V(-300, 40, 330), V(60, 10, 160)],                               // zuidwest, laag, richting oost
+    [0.310, V(60, 45, 360), V(300, 10, 60)],
+    [0.400, V(430, 80, 200), V(150, 10, -120)],                              // zuidoost, bocht naar het noorden
+    [0.490, V(460, 150, -120), V(0, 10, -60)],                               // oostkant hoog, kijkt over de wijk
+    [0.570, V(260, 110, -360), V(-150, 10, -120)],
+    [0.650, V(-120, 60, -400), V(-220, 10, 40)],                             // noordrand, richting west
+    [0.720, V(-430, 65, -220), V(-160, 10, 120)],                            // westkant, richting zuid
+    [0.790, V(-330, 40, 300), V(120, 10, 220)],
+    [0.860, V(120, 70, 390), V(420, 12, 120)],                               // zuidrand, klimmend naar het oosten
+    [0.920, V(520, 110, 60), V(300, 20, -260)],                              // draait naar het westen
+    [0.955, setCam, setCam.clone().addScaledVector(set, 700)],               // zonsondergang over de wijk
+    [1.000, endCam, endCam.clone().addScaledVector(set, 700)],
+  ];
+  DAY.knots = keys.map((k) => k[0]);
+  DAY.pos = new THREE.CatmullRomCurve3(keys.map((k) => k[1]), false, 'centripetal', 0.5);
+  DAY.tgt = new THREE.CatmullRomCurve3(keys.map((k) => k[2]), false, 'centripetal', 0.5);
+}
+function dayU(p) {   // voortgang -> curveparameter, zodat de sleutelmomenten precies op hun tijd vallen
+  const k = DAY.knots, n = k.length - 1;
+  for (let i = 0; i < n; i++) {
+    if (p <= k[i + 1]) return (i + (p - k[i]) / (k[i + 1] - k[i])) / n;
+  }
+  return 1;
+}
+const dayPos = new THREE.Vector3(), dayTgt = new THREE.Vector3();
+function setDayProgress(p) {
+  DAY.p = THREE.MathUtils.clamp(p, 0, 1);
+  const u = dayU(DAY.p);
+  DAY.pos.getPoint(u, dayPos);
+  DAY.tgt.getPoint(u, dayTgt);
+  camera.position.copy(dayPos);
+  camera.lookAt(dayTgt);
+  const when = new Date(DAY.start.getTime() + DAY.p * (DAY.end - DAY.start));
+  $('#suntime').value = when.getHours() * 60 + when.getMinutes();
+  setSun(when);
+}
+function startDay() {
+  if (state.walking) plc.unlock();
+  state.flying = null;
+  select(null);
+  buildDay($('#sundate').value ? new Date($('#sundate').value + 'T12:00:00') : new Date());
+  DAY.playing = true;
+  controls.enabled = false;
+  $('#dayplay').innerHTML = '&#x25A0; Stop';
+  setDayProgress(0);
+}
+function stopDay() {
+  if (!DAY.playing) return;
+  DAY.playing = false;
+  controls.enabled = true;
+  controls.target.copy(dayTgt);
+  controls.update();
+  $('#dayplay').innerHTML = '&#x25B6; Dag afspelen';
+}
+function stepDay(dt) {
+  setDayProgress(DAY.p + dt / DAY.duration);
+  if (DAY.p >= 1) stopDay();
+}
+$('#dayplay').addEventListener('click', () => (DAY.playing ? stopDay() : startDay()));
+renderer.domElement.addEventListener('pointerdown', stopDay);
+renderer.domElement.addEventListener('wheel', stopDay, { passive: true });
+$('#sunnow').addEventListener('click', stopDay);
+$('#suntime').addEventListener('pointerdown', stopDay);
+$('#sundate').addEventListener('input', stopDay);
 
 // Draaien en kantelen om het kijkpunt (controls.target)
 const sph = new THREE.Spherical();
@@ -427,7 +497,7 @@ function stepRotate(dt) {
 }
 function holdButton(id, dir, tilt) {
   const el = $(id);
-  const start = (e) => { e.preventDefault(); hold.dir = dir; hold.tilt = tilt; hold.since = performance.now(); };
+  const start = (e) => { e.preventDefault(); stopDay(); hold.dir = dir; hold.tilt = tilt; hold.since = performance.now(); };
   const stop = () => {
     if (!hold.dir && !hold.tilt) return;
     if (performance.now() - hold.since <= 220) { rotPending += dir * Math.PI / 6; tiltPending += tilt * 0.2; }  // korte klik: stapje
@@ -442,7 +512,7 @@ holdButton('#rotL', 1, 0);
 holdButton('#rotR', -1, 0);
 holdButton('#tiltUp', 0, -1);
 holdButton('#tiltDown', 0, 1);
-$('#north').addEventListener('click', northUp);
+$('#north').addEventListener('click', () => { stopDay(); northUp(); });
 $('#compass').addEventListener('click', northUp);
 
 const plc = new PointerLockControls(camera, renderer.domElement);
@@ -451,12 +521,15 @@ const tmpV = new THREE.Vector3();
 function isTyping(e) { return ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName); }
 window.addEventListener('keydown', (e) => {
   if (isTyping(e)) return;
+  if (e.code === 'Space') { e.preventDefault(); DAY.playing ? stopDay() : startDay(); return; }
+  if (['KeyQ', 'KeyE', 'KeyR', 'KeyF', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) stopDay();
   keys[e.code] = true;
   if (e.code === 'KeyW' && !state.walking && !state.flying) enterWalk();
   if (e.code === 'KeyO' && !state.walking) flyTo(HOME.target, HOME.pos);
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 function enterWalk() {
+  stopDay();
   plc.lock();   // camera wordt verplaatst zodra de browser de muis echt vastzet ('lock')
 }
 plc.addEventListener('lock', () => {
@@ -498,7 +571,7 @@ const clock = new THREE.Clock();
 let frames = 0, fpsT = 0;
 function updateLabels() {
   const on = state.layers.labels;
-  const maxD = state.walking ? 250 : 800;
+  const maxD = state.walking ? 250 : DAY.playing ? 350 : 800;
   const best = new Map();   // per naam het dichtstbijzijnde label
   for (const l of labelObjs) {
     l.visible = false;
@@ -517,7 +590,8 @@ function updateCompass() {
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
-  if (state.flying) stepFly(dt);
+  if (DAY.playing) stepDay(dt);
+  else if (state.flying) stepFly(dt);
   else if (state.walking) stepWalk(dt);
   else { stepRotate(dt); controls.update(); clampCamera(); }
   updateLabels();
@@ -560,8 +634,9 @@ async function init() {
   setupLabels(labels);
   $('#overlay').classList.add('hidden');
   animate();
+  startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress };
 
 init().catch((e) => {
   console.error(e);

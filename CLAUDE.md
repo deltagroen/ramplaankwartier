@@ -23,7 +23,7 @@ model toont. Zie README.md voor gebruik, bronnen en beperkingen.
 - `viewer/` moet zonder build-stap en zonder internet werken: bibliotheken zijn gevendord in `viewer/lib/`,
   alle paden zijn relatief zodat de viewer ook onder een subpad (deltagroen.nl/ramplaankwartier/) werkt.
 - `viewer/model/*.glb` zijn bouwresultaten maar worden gecommit, want de site-deploy haalt ze uit deze repo.
-  `viewer/model/tex/` niet: die texturen zitten al in `terrain.glb`.
+  `viewer/model/tex/` niet: die texturen zitten al in `terrain.glb`. Een HD-textuurlaag is bewust weggelaten (bandbreedte).
 - `buildings.glb` wordt niet met meshopt gecomprimeerd: het `_BID`-attribuut moet exact blijven.
 - Dakkleur komt uit de luchtfoto; gevelkleur is een schatting per bouwperiode (`pipeline/facade_colours.py`),
   handmatig te corrigeren via `overrides/gevelkleuren_override.json`.

@@ -27,21 +27,25 @@ vanaf `file://`).
 - Handmatig: `cd viewer && python3 -m http.server 8765` en open <http://localhost:8765/>.
 
 De map `viewer/` is zelfstandig: kopieer die map naar een andere computer of zet hem op een webserver
-(bijv. GitHub Pages) en hij werkt zonder verdere installatie. Omvang circa 30 MB (plus 28 MB HD-luchtfoto
-die alleen geladen wordt als je die laag aanzet).
+(bijv. GitHub Pages) en hij werkt zonder verdere installatie. Omvang circa 30 MB.
+
+Bij het openen wordt de dag afgespeeld: de camera begint recht boven de wijk vlak voor zonsopkomst, kantelt naar
+de opkomende zon, vliegt een lus door de wijk op wisselende hoogtes terwijl de zon zijn baan aflegt, en eindigt
+vanaf de oostkant kijkend naar de ondergaande zon (circa 100 seconden, datum uit het datumveld). Elke muis- of
+toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het opnieuw.
 
 Bediening: slepen = verschuiven, draaien = rechter muisknop, Ctrl/Shift+slepen, twee vingers op een trackpad,
 toetsen `Q`/`E` of de draaiknoppen in het paneel (`R`/`F` kantelen, knop of kompas = noorden boven),
 scrollen = zoomen, pijltjes = verschuiven, klik op een pand = BAG-gegevens, `W` = wandelen (WASD/pijltjes,
 Shift = rennen, Esc = stoppen), `O` = overzicht. In het paneel: lagen aan/uit, datum en tijd voor de zonnestand, panden kleuren op
-bouwjaar, BGT-maquette in plaats van luchtfoto, HD-luchtfoto.
+bouwjaar, BGT-maquette in plaats van luchtfoto.
 
 ## Wat zit erin
 
 | Laag | Bron | Opmerking |
 |---|---|---|
 | Terrein | AHN DTM 0,5 m via PDOK WCS (actuele AHN; hier AHN5, gevlogen 2023) | 1 m-grid, vereenvoudigd tot ca. 0,8 M driehoeken, gaten gevuld, water ingebrand |
-| Luchtfoto | Luchtfoto Beeldmateriaal NL 2026, 8 cm (PDOK WMS, laag `2026_orthoHR`) | 16 texturen van 2048² (standaard) en 4096² (HD) |
+| Luchtfoto | Luchtfoto Beeldmateriaal NL 2026, 8 cm (PDOK WMS, laag `2026_orthoHR`) | 16 texturen van 2048², ingebed in terrain.glb |
 | Gebouwen | Kadaster 3D Basisvoorziening 2025, LoD 2.2 (CityJSON) | 2730 panden, met bouwjaar en BAG-id; dakkleur = mediaankleur van de luchtfoto binnen het dak; gevelkleur = schatting op bouwjaar, afmeting en dakkleur (zie hieronder); 1,5 m onder maaiveld doorgetrokken |
 | Bomen | BGT-boompunten (gemeentelijk) + automatische detectie in DSM-DTM | hoogte uit AHN; particuliere tuinbomen zijn automatisch gedetecteerd en dus indicatief |
 | Water, wegen, groen | Kadaster 3D Basisvoorziening 2025 (BGT-vlakken met hoogte) | water altijd zichtbaar; wegen/groen als "maquette"-laag |
@@ -78,7 +82,7 @@ Pipeline:
 2. `build_water_maquette.py` – water.glb en maquette.glb; schrijft ook de watervlakken voor stap 4 en 6.
 3. `build_buildings.py` – buildings.glb en buildings.json (attributen per pand).
 4. `build_terrain.py` – terrain.glb (16 patches met UV's) en heights_2m.u16 (hoogtegrid voor de viewer).
-5. `build_textures.py` – WebP-texturen per patch (standaard en HD).
+5. `build_textures.py` – WebP-texturen per patch.
 6. `build_trees.py` – trees.glb en trees.json.
 7. `build_misc.py` – buurtgrens.json, labels.json, scene.json.
 8. `optimize.sh` – terrein vereenvoudigen en meshopt-compressie (gltf-transform). `buildings.glb` blijft

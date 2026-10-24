@@ -28,7 +28,7 @@ WMS_SUB = 2
 WMS_GSD = 0.085                                        # m per pixel per verzoek; fijner dan 8 cm levert de WMS leeg beeld
 WMS_MAXPX = 2500
 TEX_STD = 2048                                         # standaardtextuur per patch (px)
-TEX_HD = 4096                                          # HD-textuur per patch (px)
+TEX_HD = None                                          # HD-textuur per patch (px), None = overslaan (niet in de viewer)
 WEBP_QUALITY = 82
 
 # Hoogtemodel via PDOK WCS (actuele AHN, 0,5 m).
@@ -63,5 +63,5 @@ def to_local(x, y, z):
 
 
 def ensure_dirs():
-    for d in (RAW / "terrain", RAW / "ortho", RAW / "vector", RAW / "kadaster3d", WORK, MODEL, MODEL / "tex", MODEL / "tex_hd"):
+    for d in (RAW / "terrain", RAW / "ortho", RAW / "vector", RAW / "kadaster3d", WORK, MODEL, MODEL / "tex"):
         d.mkdir(parents=True, exist_ok=True)
