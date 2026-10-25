@@ -1423,7 +1423,7 @@ function updateCompass() {
 }
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.1);
+  const raw = clock.getDelta(), dt = Math.min(raw, 0.1);
   if (DAY.playing) stepDay(dt);
   else if (state.flying) stepFly(dt);
   else if (state.walking) stepWalk(dt);
@@ -1436,11 +1436,103 @@ function animate() {
   if (seasonWeatherDirty) { seasonWeatherDirty = false; setSun(DAY.playing ? new Date(DAY.start.getTime() + DAY.p * (DAY.end - DAY.start)) : currentSunDate()); }
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
+  qualityTick(raw);
   frames++; fpsT += dt;
   if (fpsT >= 1) {
-    $('#perf').textContent = `${(renderer.info.render.triangles / 1e6).toFixed(2)} M driehoeken · ${Math.round(frames / fpsT)} fps`;
+    $('#perf').textContent = `${(renderer.info.render.triangles / 1e6).toFixed(2)} M driehoeken · ${Math.round(frames / fpsT)} fps · ${qualityText()}`;
     frames = 0; fpsT = 0;
   }
+}
+
+// ---------- kwaliteit: automatisch terugschakelen bij lage framerate ----------
+// Stappen in volgorde: resolutie naar 1x, schaduw uit, omgeving uit (en niet meer laden). In de stand 'auto' wordt
+// de framerate gemeten in vensters van 3 s zodra het model draait; een stap volgt bij twee vensters achtereen onder
+// 25 fps, of meteen bij één venster onder 15 fps; nooit automatisch weer omhoog. (Browsers beperken een venster dat
+// deels bedekt is soms tot 30 fps; daarom ligt de grens onder de 30.) De omgeving (38 MB) wordt pas geladen na een venster met voldoende fps. 'licht' past
+// alle stappen meteen toe, 'hoog' schakelt niets terug. Keuze via het paneel of ?kwaliteit=auto|hoog|licht; de
+// keuze en de automatisch bereikte stappen worden onthouden (localStorage), 'hoog' kiezen wist dat.
+const QUALITY = { mode: 'auto', steps: ['resolutie', 'schaduw', 'omgeving'], applied: [], fpsMin: 25, fpsLow: 15, win: 3,
+                  t: 0, frames: 0, hold: 2, bad: 0, loading: false, gate: false, started: false,
+                  label: { resolutie: 'lagere resolutie', schaduw: 'schaduw uit', omgeving: 'omgeving uit' } };
+const DPR_FULL = Math.min(window.devicePixelRatio, 1.5);
+const CONTEXT_FILES = ['context_terrain.glb', 'context_objects.glb', 'context_trees.glb', 'context_outer_terrain.glb', 'context_outer_objects.glb'];
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+                set: (k, v) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} } };
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 4500);
+}
+function qualityText() {
+  return QUALITY.applied.length ? 'licht: ' + QUALITY.applied.map((s) => QUALITY.label[s]).join(', ') : 'hoog';
+}
+function setLayerBox(name, on) {       // laag en vinkje samen
+  const cb = document.querySelector(`[data-layer="${name}"]`);
+  if (cb) cb.checked = on;
+  setLayer(name, on);
+}
+function applyQualityStep(step) {
+  if (QUALITY.applied.includes(step)) return;
+  QUALITY.applied.push(step);
+  if (step === 'resolutie') renderer.setPixelRatio(1);
+  if (step === 'schaduw') setLayerBox('schaduw', false);
+  if (step === 'omgeving') setLayerBox('omgeving', false);
+  $('#qualitynote').textContent = qualityText();
+}
+function restoreQuality() {
+  QUALITY.applied = [];
+  renderer.setPixelRatio(DPR_FULL);
+  setLayerBox('schaduw', true);
+  setLayerBox('omgeving', true);
+  $('#qualitynote').textContent = '';
+}
+function loadContext() {                // omgeving na elkaar laden, van dichtbij naar veraf; stopt zodra 'omgeving uit' geldt
+  if (QUALITY.started) return;
+  QUALITY.started = true;
+  let chain = Promise.resolve();
+  for (const f of CONTEXT_FILES) chain = chain.then(() => {
+    if (QUALITY.applied.includes('omgeving')) return;
+    QUALITY.loading = true;
+    return loadGLB(f).then(setupContext).catch((e) => console.warn(f, e))
+      .finally(() => { QUALITY.loading = false; QUALITY.hold = 1; QUALITY.t = 0; QUALITY.frames = 0; });
+  });
+}
+function openContextGate() {
+  if (QUALITY.gate || QUALITY.applied.includes('omgeving')) return;
+  QUALITY.gate = true;
+  loadContext();
+}
+function qualityTick(dt) {
+  if (QUALITY.mode !== 'auto' || dt > 0.5 || QUALITY.loading || document.hidden) return;   // achtergrondtab, laadhapering
+  if (QUALITY.hold > 0) { QUALITY.hold -= dt; return; }   // even wachten na een verandering (shaders, laden)
+  QUALITY.t += dt; QUALITY.frames++;
+  if (QUALITY.t < QUALITY.win) return;
+  const fps = QUALITY.frames / QUALITY.t;
+  QUALITY.t = 0; QUALITY.frames = 0;
+  if (fps >= QUALITY.fpsMin) { QUALITY.bad = 0; openContextGate(); return; }   // snel genoeg: de omgeving mag laden
+  QUALITY.bad++;
+  if (QUALITY.bad < 2 && fps >= QUALITY.fpsLow) return;      // één matig venster kan een hapering zijn
+  const next = QUALITY.steps.find((s) => !QUALITY.applied.includes(s) && !(s === 'resolutie' && DPR_FULL <= 1));
+  if (!next) return;
+  applyQualityStep(next);
+  QUALITY.hold = 1.5; QUALITY.bad = 0;
+  store.set('kwaliteit_stappen', QUALITY.applied.join(','));
+  toast(`Lichte stand: ${QUALITY.label[next]} (${Math.round(fps)} fps)`);
+}
+function setQualityMode(mode, remember = true) {
+  QUALITY.mode = ['hoog', 'licht'].includes(mode) ? mode : 'auto';
+  $('#quality').value = QUALITY.mode;
+  if (remember) store.set('kwaliteit', QUALITY.mode);
+  if (QUALITY.mode === 'hoog') { restoreQuality(); store.set('kwaliteit_stappen', null); if (QUALITY.ready) openContextGate(); }
+  else if (QUALITY.mode === 'licht') { QUALITY.steps.forEach(applyQualityStep); }
+  else { QUALITY.t = 0; QUALITY.frames = 0; QUALITY.bad = 0; QUALITY.hold = 1; }
+}
+$('#quality').addEventListener('change', (e) => setQualityMode(e.target.value));
+{
+  const param = new URLSearchParams(location.search).get('kwaliteit');
+  const remembered = store.get('kwaliteit_stappen');
+  setQualityMode(param || store.get('kwaliteit') || 'auto', !!param);
+  if (QUALITY.mode === 'auto' && remembered) remembered.split(',').filter((s) => QUALITY.steps.includes(s)).forEach(applyQualityStep);
 }
 
 window.addEventListener('resize', () => {
@@ -1483,11 +1575,11 @@ async function init() {
   $('#overlay').classList.add('hidden');
   animate();
   startDay();
-  let chain = Promise.resolve();
-  for (const f of ['context_terrain.glb', 'context_objects.glb', 'context_trees.glb', 'context_outer_terrain.glb', 'context_outer_objects.glb'])
-    chain = chain.then(() => loadGLB(f).then(setupContext).catch((e) => console.warn(f, e)));
+  QUALITY.ready = true;                                        // hoofdmodel draait: meten mag, omgeving mag na een goed venster
+  if (QUALITY.mode === 'hoog') openContextGate();
+  if (QUALITY.applied.length) toast(`Lichte stand (${QUALITY.mode === 'licht' ? 'gekozen' : 'onthouden'}): ${QUALITY.applied.map((s) => QUALITY.label[s]).join(', ')}`);
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, seasonSets, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked, buildDay, grensRadius, grensDist, STREETS };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, seasonSets, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked, buildDay, grensRadius, grensDist, STREETS, QUALITY, setQualityMode };
 
 init().catch((e) => {
   console.error(e);

@@ -76,6 +76,12 @@
     <p class="muted small">Draaien: rechter muisknop of <b>Ctrl</b>/<b>Shift</b>+slepen (trackpad: twee vingers slepen),
       toetsen <b>Q</b>/<b>E</b>, of de knoppen. Pijltjestoetsen verschuiven. Klik op het kompas voor noorden boven.<br>
       Wandelen: muis kijkt rond, <b>WASD</b>/pijltjes lopen, <b>Shift</b> sprinten, <b>Esc</b> stopt. Gevels, stammen en water houden je tegen; op dik ijs kun je het water op.</p>
+    <div class="row"><label for="quality" class="muted small" style="display:inline">Kwaliteit</label>
+      <select id="quality" title="Automatisch: bij minder dan 30 fps trapsgewijs terugschakelen (lagere resolutie, schaduw uit, omgeving uit). Hoog: alles aan. Licht: alles meteen uit.">
+        <option value="auto">automatisch</option>
+        <option value="hoog">hoog</option>
+        <option value="licht">licht</option>
+      </select> <span id="qualitynote" class="muted small"></span></div>
     <details id="bronnen">
       <summary class="muted small">Bronnen en licenties</summary>
       <ul class="small">
@@ -97,6 +103,7 @@
 <div id="info" class="hidden"></div>
 
 <script src="./lib/suncalc/suncalc.js"></script>
+<div id="toast"></div>
 <script type="module" src="./app.js?v=__VERSION__"></script>
 </body>
 </html>

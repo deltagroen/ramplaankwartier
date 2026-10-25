@@ -60,6 +60,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1116; col
 #bronnen ul { margin: 6px 0 4px; padding-left: 18px; }
 #bronnen a { color: #8ec5ff; }
 #perf { color: #8fa3b8; margin-top: 4px; }
+#toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: rgba(20, 26, 33, .92); color: #e6edf3;
+  padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .4s; pointer-events: none; z-index: 20; white-space: nowrap; }
+#toast.show { opacity: 1; }
 
 @media (max-width: 640px) {
   #panel { width: calc(100% - 24px); max-height: 50%; }

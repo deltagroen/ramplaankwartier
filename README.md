@@ -123,6 +123,22 @@ Pipeline:
 9. `optimize.sh` – terrein vereenvoudigen en meshopt-compressie (gltf-transform). `buildings.glb` blijft
    ongecomprimeerd omdat het `_BID`-attribuut exact moet blijven.
 
+## Kwaliteit en prestaties
+
+De hele scène is circa 6,7 M driehoeken en 70 MB; dat is te zwaar voor oudere laptops, geïntegreerde GPU's en de
+meeste telefoons. De viewer schaalt daarom zelf terug (stand *automatisch*, de standaard): zodra het hoofdmodel
+draait meet hij de framerate in vensters van 3 s. Bij twee vensters achtereen onder 25 fps, of één venster onder
+15 fps, volgt de volgende stap: resolutie naar 1× (scheelt op retina- en telefoonschermen een factor 2 tot 4 aan
+pixels), dan schaduw uit, dan de omgeving uit. De omgeving (38 MB) wordt pas geladen na een venster met voldoende
+fps, zodat een zwakke machine die download bespaard blijft. Er wordt nooit automatisch teruggeschakeld naar een
+hogere stand; de bereikte stappen worden onthouden (localStorage) zodat een volgend bezoek meteen licht begint.
+Een melding onderin toont elke stap, en de regel onder "Bronnen" in het paneel toont de actuele stand.
+
+Handmatig: in het paneel bij Kwaliteit *hoog* (alles aan, wist de onthouden stappen) of *licht* (alle stappen
+meteen), of via de URL: `?kwaliteit=licht`, `?kwaliteit=hoog`, `?kwaliteit=auto`. De keuze via de URL of het
+paneel wordt onthouden. Het hoofdmodel alleen (werkgebied zonder omgeving) is 1,7 M driehoeken en 31 MB; wie
+daar al niet aan toekomt, heeft baat bij de tegelaanpak met detailniveaus op afstand, die nog niet gebouwd is.
+
 ## Weer
 
 Standaard toont de viewer het werkelijke weer van de gekozen dag, per uur, uit [Open-Meteo](https://open-meteo.com)
