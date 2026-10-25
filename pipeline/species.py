@@ -160,9 +160,12 @@ GENERIC_WEIGHTS = [0.34, 0.3, 0.22, 0.14]
 class SpeciesTable:
     """Bouwt een lijst unieke profielen op (index per profiel) en wijst bomen toe."""
 
-    def __init__(self):
+    def __init__(self, profiles=None):
         self.profiles = []
         self._index = {}
+        for pr in profiles or []:               # bestaande species.json inladen, zodat indices stabiel blijven
+            self._index[pr["key"]] = len(self.profiles)
+            self.profiles.append(pr)
 
     def _add(self, key, profile):
         if key not in self._index:

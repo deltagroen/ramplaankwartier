@@ -24,6 +24,13 @@ RING_WMS_SUB = 2                                       # 2 x 2 WMS-verzoeken van
 RING_WMS_PX = 2000
 RING_TEX = 4096
 
+# Buitenzone: nog grover, 10 x 10 km, met de ring als gat.
+OUTER = (96800.0, 483600.0, 106800.0, 493600.0)
+OUTER_GRID = 20.0
+OUTER_WMS_SUB = 2                                      # 2 x 2 verzoeken van 5 km op 2000 px (2,5 m/px)
+OUTER_WMS_PX = 2000
+OUTER_TEX = 4096
+
 # Terrein: patches met eigen textuur.
 NX, NY = 4, 4                                          # 4 x 4 patches van 350 x 300 m
 GRID_M = 1.0                                           # hoekpuntafstand terreinmesh (m)

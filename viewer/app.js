@@ -500,8 +500,19 @@ function setupBuildings(root, info) {
   layers.gebouwen.add(root);
 }
 
-let tMesh = null, twigMesh = null, tOrig = null, tSeason = null, tSpec = null, tCrown = null, tTid = null;
+let tMesh = null, twigMesh = null, tTid = null;
 let wSeason = null, wSpec = null, seasonKey = null, SPECIES = [], TREES = null;
+// Kronen die met het seizoen meekleuren: wijkbomen, omgevingsbomen en het bosdek van de omgeving. Een set zonder
+// takkenmodel krijgt een 'bare'-instelling: kale kronen worden doorzichtig in takkenkleur in plaats van onzichtbaar.
+const seasonSets = [];
+function addSeasonSet(mesh, bare = null, blend = null) {    // blend: 'depth' of 'nodepth' = gewone transparantie i.p.v. alpha-hash
+  const g = mesh.geometry;
+  const season = g.getAttribute('_season'), spec = g.getAttribute('_spec'), col = g.getAttribute('color');
+  if (!season || !spec || !col) return;
+  seasonSets.push({ mesh, orig: col.array.slice(), season, spec, crown: g.getAttribute('_crown'), bare, blend });
+  seasonKey = null;
+  applySeason(currentSunDate());
+}
 function setupTrees(root) {
   root.traverse((o) => {
     if (!o.isMesh) return;
@@ -518,13 +529,12 @@ function setupTrees(root) {
       tMesh = o;
       o.castShadow = o.receiveShadow = true;
       enableSnow(o.material, 0.8);
-      const g = o.geometry;
-      tOrig = g.getAttribute('color').array.slice();
-      tSeason = g.getAttribute('_season'); tSpec = g.getAttribute('_spec'); tCrown = g.getAttribute('_crown'); tTid = g.getAttribute('_tid');
+      tTid = o.geometry.getAttribute('_tid');
     }
   });
   layers.bomen.add(root);
-  applySeason(currentSunDate());
+  if (tMesh) addSeasonSet(tMesh);
+  else applySeason(currentSunDate());
 }
 
 // Procedurele takkentextuur: atlas van 5 tegels. Tegel 0-3: zijaanzicht met oplopende stamdikte (fractie van de
@@ -611,44 +621,55 @@ function seasonFactors(doy, prof) {
   return { leaf, autumn, spring, blossom };
 }
 function applySeason(date) {
-  if (!tMesh || !tSeason || !tSpec || !SPECIES.length) return;
+  if (!seasonSets.length || !SPECIES.length) return;
   const key = date.getFullYear() * 1000 + Math.floor((date - new Date(date.getFullYear(), 0, 1)) / 86400000);
   if (key === seasonKey) return;
   seasonKey = key;
   const doy0 = (date - new Date(date.getFullYear(), 0, 1)) / 86400000;
-  const col = tMesh.geometry.getAttribute('color');
-  const arr = col.array, k = col.itemSize;
-  let anyAlpha = false;
-  for (let i = 0; i < col.count; i++) {
-    if (tCrown.getX(i) < 0.5) continue;
-    const r = tSeason.getX(i);
-    const prof = SPECIES[tSpec.getX(i) | 0] || SPECIES[0];
-    const doy = doy0 - (r - 0.5) * 14;                            // per boom tot een week vroeger of later
-    const f = seasonFactors(doy, prof);
-    let R = tOrig[i * k] / 255, G = tOrig[i * k + 1] / 255, B = tOrig[i * k + 2] / 255;
-    const sp = f.spring * 0.45;
-    R = R * (1 - sp) + 0.42 * sp; G = G * (1 - sp) + 0.62 * sp; B = B * (1 - sp) + 0.12 * sp;
-    if (f.autumn > 0) {
-      const v = 0.86 + 0.28 * ((r * 5.3) % 1);                   // per boom lichter of donkerder herfstblad
-      const a = f.autumn;
-      R = R * (1 - a) + prof.autumn[0] * v * a; G = G * (1 - a) + prof.autumn[1] * v * a; B = B * (1 - a) + prof.autumn[2] * v * a;
+  for (const set of seasonSets) {
+    const col = set.mesh.geometry.getAttribute('color');
+    const arr = col.array, k = col.itemSize, orig = set.orig, crown = set.crown, bare = set.bare;
+    let anyAlpha = false;
+    for (let i = 0; i < col.count; i++) {
+      if (crown && crown.getX(i) < 0.5) continue;
+      const r = set.season.getX(i);
+      const prof = SPECIES[set.spec.getX(i) | 0] || SPECIES[0];
+      const doy = doy0 - (r - 0.5) * 14;                            // per boom tot een week vroeger of later
+      const f = seasonFactors(doy, prof);
+      let R = orig[i * k] / 255, G = orig[i * k + 1] / 255, B = orig[i * k + 2] / 255;
+      const sp = f.spring * 0.45;
+      R = R * (1 - sp) + 0.42 * sp; G = G * (1 - sp) + 0.62 * sp; B = B * (1 - sp) + 0.12 * sp;
+      if (f.autumn > 0) {
+        const v = 0.86 + 0.28 * ((r * 5.3) % 1);                   // per boom lichter of donkerder herfstblad
+        const a = f.autumn;
+        R = R * (1 - a) + prof.autumn[0] * v * a; G = G * (1 - a) + prof.autumn[1] * v * a; B = B * (1 - a) + prof.autumn[2] * v * a;
+      }
+      if (f.blossom > 0.02) {
+        const b = f.blossom * 0.9;
+        R = R * (1 - b) + prof.blossom[0] * b; G = G * (1 - b) + prof.blossom[1] * b; B = B * (1 - b) + prof.blossom[2] * b;
+      }
+      let alpha = prof.evergreen ? 1 : THREE.MathUtils.clamp(Math.max(f.leaf, f.blossom * 0.95), 0, 1);
+      if (bare && alpha < 1) {                                       // geen takkenmodel: kale kroon wordt doorzichtig bruin
+        const t = 1 - alpha;
+        R = R * (1 - t) + bare.col[0] * t; G = G * (1 - t) + bare.col[1] * t; B = B * (1 - t) + bare.col[2] * t;
+        alpha = Math.max(alpha, bare.alpha);
+      }
+      arr[i * k] = Math.round(THREE.MathUtils.clamp(R, 0, 1) * 255);
+      arr[i * k + 1] = Math.round(THREE.MathUtils.clamp(G, 0, 1) * 255);
+      arr[i * k + 2] = Math.round(THREE.MathUtils.clamp(B, 0, 1) * 255);
+      if (k === 4) {
+        arr[i * k + 3] = Math.round(alpha * 255);
+        if (alpha < 0.995) anyAlpha = true;
+      }
     }
-    if (f.blossom > 0.02) {
-      const b = f.blossom * 0.9;
-      R = R * (1 - b) + prof.blossom[0] * b; G = G * (1 - b) + prof.blossom[1] * b; B = B * (1 - b) + prof.blossom[2] * b;
-    }
-    arr[i * k] = Math.round(THREE.MathUtils.clamp(R, 0, 1) * 255);
-    arr[i * k + 1] = Math.round(THREE.MathUtils.clamp(G, 0, 1) * 255);
-    arr[i * k + 2] = Math.round(THREE.MathUtils.clamp(B, 0, 1) * 255);
-    if (k === 4) {
-      const alpha = prof.evergreen ? 1 : THREE.MathUtils.clamp(Math.max(f.leaf, f.blossom * 0.95), 0, 1);
-      arr[i * k + 3] = Math.round(alpha * 255);
-      if (alpha < 0.995) anyAlpha = true;
-    }
+    col.needsUpdate = true;
+    const m = set.mesh.material;
+    if (set.blend) {                                                  // mengen in plaats van hash-ruis; 'depth' houdt de
+      if (m.transparent !== anyAlpha) {                                 // dieptebuffer zodat kronen elkaar netjes afdekken
+        m.transparent = anyAlpha; m.depthWrite = !anyAlpha || set.blend === 'depth'; m.needsUpdate = true;
+      }
+    } else if (m.alphaHash !== anyAlpha) { m.alphaHash = anyAlpha; m.transparent = false; m.needsUpdate = true; }
   }
-  col.needsUpdate = true;
-  const m = tMesh.material;
-  if (m.alphaHash !== anyAlpha) { m.alphaHash = anyAlpha; m.transparent = false; m.needsUpdate = true; }
   if (twigMesh && wSeason && wSpec) {                          // kale takken zichtbaar naarmate het blad valt
     const wc = twigMesh.geometry.getAttribute('color');
     const wa = wc.array, wk = wc.itemSize;
@@ -699,21 +720,37 @@ function setIce(ice, snow) {          // bevroren water: mat, licht grijsblauw e
   }
 }
 
-// ---------- omgeving: grof terrein, blokgebouwen en water buiten het werkgebied ----------
-function setupContext(terrainGltf, objectsGltf) {
-  if (terrainGltf) terrainGltf.scene.traverse((o) => {
-    if (!o.isMesh) return;
-    o.material.roughness = 1; o.material.metalness = 0;
-    if (o.material.map) o.material.map.anisotropy = maxAniso;
-    enableSnow(o.material, 1);
+// ---------- omgeving: ring (6 x 6 km) en buitenzone (10 x 10 km), grof en niet bevliegbaar ----------
+// Meshnamen: *_terrein (luchtfototextuur), *_gebouwen[_nabij] (vlakke schaduw, nabij werpt schaduw), *_water,
+// omgeving_bomen[_nabij] (kronen met seizoen, zonder takken), omgeving_bos (kroonlaag over dichte bossen).
+function setupContext(gltf) {
+  if (!gltf) return;
+  const bareTree = { alpha: 0.35, col: [0.47, 0.42, 0.38] }, bareForest = { alpha: 0.55, col: [0.40, 0.35, 0.31] };
+  const meshes = [];
+  gltf.scene.traverse((o) => { if (o.isMesh) meshes.push(o); });
+  for (const o of meshes) {
+    const n = o.name, m = o.material;
+    m.metalness = 0;
+    if (n.includes('terrein')) {
+      m.roughness = 1;
+      if (m.map) m.map.anisotropy = maxAniso;
+      o.receiveShadow = true;
+      enableSnow(m, 1);
+    } else if (n.includes('water')) {
+      setupWaterMaterial(m);
+    } else if (n.includes('bomen') || n.includes('bos')) {
+      m.vertexColors = true; m.roughness = 0.95;
+      if (n.includes('bos')) m.side = THREE.DoubleSide;
+      enableSnow(m, 0.8);
+      if (n.includes('nabij')) o.castShadow = o.receiveShadow = true;
+      addSeasonSet(o, n.includes('bos') ? bareForest : bareTree, n.includes('nabij') ? 'depth' : 'nodepth');
+    } else {
+      m.vertexColors = true; m.flatShading = true; m.roughness = 0.9;
+      enableSnow(m, 1);
+      if (n.includes('nabij')) o.castShadow = o.receiveShadow = true;
+    }
     layers.omgeving.add(o);
-  });
-  if (objectsGltf) objectsGltf.scene.traverse((o) => {
-    if (!o.isMesh) return;
-    if (o.name === 'omgeving_water') setupWaterMaterial(o.material);
-    else { o.material.vertexColors = true; o.material.flatShading = true; o.material.roughness = 0.9; o.material.metalness = 0; enableSnow(o.material, 1); }
-    layers.omgeving.add(o);
-  });
+  }
   layers.omgeving.visible = state.layers.omgeving;
 }
 
@@ -1407,10 +1444,11 @@ async function init() {
   $('#overlay').classList.add('hidden');
   animate();
   startDay();
-  Promise.all([loadGLB('context_terrain.glb').catch(() => null), loadGLB('context_objects.glb').catch(() => null)])
-    .then(([ct, co]) => setupContext(ct, co));
+  let chain = Promise.resolve();
+  for (const f of ['context_terrain.glb', 'context_objects.glb', 'context_trees.glb', 'context_outer_terrain.glb', 'context_outer_objects.glb'])
+    chain = chain.then(() => loadGLB(f).then(setupContext).catch((e) => console.warn(f, e)));
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, seasonSets, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked };
 
 init().catch((e) => {
   console.error(e);

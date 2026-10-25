@@ -187,35 +187,38 @@ def fetch_haarlem_bor():
     print(f"[haarlem] {len(d.get('features', []))} bomen uit het beheerregister -> {dest.name}")
 
 
-def fetch_ring():
-    """Omgeving: hoogtemodel op 5 m (WCS geschaald), luchtfoto op 1,5 m, Kadaster-gebouwen en BGT-water."""
-    minx, miny, maxx, maxy = C.RING
-    dest = C.RAW / "terrain" / "dtm_ring_5m.tif"
+def _wcs_scaled(cov, bbox, scale, dest, tag):
+    minx, miny, maxx, maxy = bbox
     if dest.exists():
-        print(f"[ring] {dest.name} bestaat al")
-    else:
-        url = (f"{C.WCS_URL}?service=WCS&version=2.0.1&request=GetCoverage&coverageid=dtm_05m"
-               f"&subset=x({minx:.0f},{maxx:.0f})&subset=y({miny:.0f},{maxy:.0f})&scalefactor=0.1&format=image/tiff")
-        http_get(url, dest)
-        print(f"[ring] {dest.name}: {dest.stat().st_size/1e6:.1f} MB")
-    (C.RAW / "ortho_ring").mkdir(parents=True, exist_ok=True)
-    sw, sh = (maxx - minx) / C.RING_WMS_SUB, (maxy - miny) / C.RING_WMS_SUB
-    for a in range(C.RING_WMS_SUB):
-        for b in range(C.RING_WMS_SUB):
-            dest = C.RAW / "ortho_ring" / f"r{a}{b}.jpg"
+        print(f"[{tag}] {dest.name} bestaat al"); return
+    url = (f"{C.WCS_URL}?service=WCS&version=2.0.1&request=GetCoverage&coverageid={cov}"
+           f"&subset=x({minx:.0f},{maxx:.0f})&subset=y({miny:.0f},{maxy:.0f})&scalefactor={scale}&format=image/tiff")
+    http_get(url, dest)
+    print(f"[{tag}] {dest.name}: {dest.stat().st_size/1e6:.1f} MB")
+
+
+def _wms_tiles(bbox, sub, px, folder, tag):
+    minx, miny, maxx, maxy = bbox
+    folder.mkdir(parents=True, exist_ok=True)
+    sw, sh = (maxx - minx) / sub, (maxy - miny) / sub
+    for a in range(sub):
+        for b in range(sub):
+            dest = folder / f"r{a}{b}.jpg"
             if dest.exists():
                 continue
-            bbox = f"{minx + a*sw:.1f},{miny + b*sh:.1f},{minx + (a+1)*sw:.1f},{miny + (b+1)*sh:.1f}"
+            bb = f"{minx + a*sw:.1f},{miny + b*sh:.1f},{minx + (a+1)*sw:.1f},{miny + (b+1)*sh:.1f}"
             url = (f"{C.WMS_URL}?service=WMS&version=1.3.0&request=GetMap&layers={C.WMS_LAYER}"
-                   f"&styles=&crs=EPSG:28992&bbox={bbox}&width={C.RING_WMS_PX}&height={C.RING_WMS_PX}&format=image/jpeg")
+                   f"&styles=&crs=EPSG:28992&bbox={bb}&width={px}&height={px}&format=image/jpeg")
             http_get(url, dest)
-            print(f"[ring] luchtfoto {dest.name} ({dest.stat().st_size/1e6:.1f} MB)", flush=True)
-    fetch_kadaster(bbox=C.RING, kinds=("gebouwen",))
-    dest = C.RAW / "vector" / "bgt_waterdeel_ring.geojson"
+            print(f"[{tag}] luchtfoto {dest.name} ({dest.stat().st_size/1e6:.1f} MB)", flush=True)
+
+
+def _bgt_items(collection, bbox, dest, tag, keep_props=()):
     if dest.exists():
-        print(f"[ring] {dest.name} bestaat al"); return
+        print(f"[{tag}] {dest.name} bestaat al"); return
+    minx, miny, maxx, maxy = bbox
     crs = urllib.parse.quote(C.RD_CRS, safe="")
-    url = (f"{C.BGT_API}/collections/waterdeel/items?bbox={minx:.0f},{miny:.0f},{maxx:.0f},{maxy:.0f}"
+    url = (f"{C.BGT_API}/collections/{collection}/items?bbox={minx:.0f},{miny:.0f},{maxx:.0f},{maxy:.0f}"
            f"&bbox-crs={crs}&crs={crs}&limit=1000&f=json")
     feats = []
     while url:
@@ -223,16 +226,48 @@ def fetch_ring():
         d = json.loads(data)
         feats.extend(d.get("features", []))
         url = next((l["href"] for l in d.get("links", []) if l.get("rel") == "next"), None)
-        print(f"[ring] {len(feats)} waterdelen ...", flush=True)
-    feats = [{"type": "Feature", "geometry": f["geometry"], "properties": {}} for f in feats if f.get("geometry")]
+        print(f"[{tag}] {collection}: {len(feats)} ...", flush=True)
+    feats = [{"type": "Feature", "geometry": f["geometry"],
+              "properties": {k: f["properties"].get(k) for k in keep_props}} for f in feats if f.get("geometry")]
     dest.write_text(json.dumps({"type": "FeatureCollection", "crs_epsg": 28992, "features": feats}))
-    print(f"[ring] {len(feats)} waterdelen -> {dest.name}")
+    print(f"[{tag}] {len(feats)} {collection} -> {dest.name}")
+
+
+def fetch_ring():
+    """Omgeving 6 x 6 km: DTM en DSM op 5 m, luchtfoto op 1,5 m, Kadaster-gebouwen, BGT-water en -bomen, register."""
+    _wcs_scaled("dtm_05m", C.RING, 0.1, C.RAW / "terrain" / "dtm_ring_5m.tif", "ring")
+    _wcs_scaled("dsm_05m", C.RING, 0.1, C.RAW / "terrain" / "dsm_ring_5m.tif", "ring")
+    _wms_tiles(C.RING, C.RING_WMS_SUB, C.RING_WMS_PX, C.RAW / "ortho_ring", "ring")
+    fetch_kadaster(bbox=C.RING, kinds=("gebouwen",))
+    _bgt_items("waterdeel", C.RING, C.RAW / "vector" / "bgt_waterdeel_ring.geojson", "ring")
+    _bgt_items("vegetatieobject_punt", C.RING, C.RAW / "vector" / "bgt_bomen_ring.geojson", "ring", keep_props=("plus_type",))
+    dest = C.RAW / "vector" / "haarlem_bor_bomen_ring.geojson"
+    if dest.exists():
+        print(f"[ring] {dest.name} bestaat al")
+    else:
+        minx, miny, maxx, maxy = C.RING
+        url = (f"{C.HAARLEM_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeNames=gemeentehaarlem:bor_bomen"
+               f"&outputFormat=application/json&srsName=EPSG:28992&bbox={minx:.0f},{miny:.0f},{maxx:.0f},{maxy:.0f},EPSG:28992&count=100000")
+        data, _ = http_get(url)
+        d = json.loads(data)
+        keep = ("geslachtsnaam", "naam_lt", "kroondiameter", "stamomtrek")
+        d["features"] = [{"type": "Feature", "geometry": f["geometry"], "properties": {k: f["properties"].get(k) for k in keep}} for f in d["features"]]
+        dest.write_text(json.dumps(d, ensure_ascii=False))
+        print(f"[ring] {len(d['features'])} registerbomen -> {dest.name}")
+
+
+def fetch_outer():
+    """Buitenzone 10 x 10 km: DTM op 10 m, luchtfoto op 2,5 m, Kadaster-gebouwen en BGT-water."""
+    _wcs_scaled("dtm_05m", C.OUTER, 0.05, C.RAW / "terrain" / "dtm_outer_10m.tif", "buiten")
+    _wms_tiles(C.OUTER, C.OUTER_WMS_SUB, C.OUTER_WMS_PX, C.RAW / "ortho_outer", "buiten")
+    fetch_kadaster(bbox=C.OUTER, kinds=("gebouwen",))
+    _bgt_items("waterdeel", C.OUTER, C.RAW / "vector" / "bgt_waterdeel_outer.geojson", "buiten")
 
 
 if __name__ == "__main__":
     C.ensure_dirs()
-    steps = sys.argv[1:] or ["terrain", "kadaster", "bgt", "labels", "haarlem", "buurt", "ortho", "ring"]
+    steps = sys.argv[1:] or ["terrain", "kadaster", "bgt", "labels", "haarlem", "buurt", "ortho", "ring", "outer"]
     for s in steps:
         {"terrain": fetch_terrain, "ortho": fetch_ortho, "kadaster": fetch_kadaster,
-         "bgt": fetch_bgt_trees, "labels": fetch_bgt_labels, "haarlem": fetch_haarlem_bor, "buurt": fetch_buurt, "ring": fetch_ring}[s]()
+         "bgt": fetch_bgt_trees, "labels": fetch_bgt_labels, "haarlem": fetch_haarlem_bor, "buurt": fetch_buurt, "ring": fetch_ring, "outer": fetch_outer}[s]()
     print("klaar")

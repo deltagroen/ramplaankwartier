@@ -1,6 +1,6 @@
 # Ramplaankwartier 3D
 
-Interactief 3D-model van het Ramplaankwartier (Haarlem) en 300 m omgeving, opgebouwd uit open overheidsdata
+Interactief 3D-model van het Ramplaankwartier (Haarlem) met grove omgeving tot 10 × 10 km, opgebouwd uit open overheidsdata
 (AHN, Kadaster 3D Basisvoorziening, luchtfoto's, BGT, CBS). Het model draait in de browser op een gewone
 computer, met vrij gezichtspunt, zonnestand met schaduwen, wandelmodus en BAG-informatie per pand.
 
@@ -27,7 +27,7 @@ vanaf `file://`).
 - Handmatig: `cd viewer && python3 -m http.server 8765` en open <http://localhost:8765/>.
 
 De map `viewer/` is zelfstandig: kopieer die map naar een andere computer of zet hem op een webserver
-(bijv. GitHub Pages) en hij werkt zonder verdere installatie. Omvang circa 42 MB, waarvan 11 MB omgeving die na het hoofdmodel wordt geladen.
+(bijv. GitHub Pages) en hij werkt zonder verdere installatie. Omvang circa 70 MB, waarvan 38 MB omgeving die in vijf delen na het hoofdmodel wordt geladen (ring eerst, buitenzone laatst).
 
 Bij het openen wordt de dag afgespeeld: de camera begint recht boven de wijk vlak voor zonsopkomst, kantelt naar
 de opkomende zon, vliegt een lus om en door de wijk op wisselende hoogtes terwijl de zon zijn baan aflegt, en
@@ -59,7 +59,8 @@ maar onder een kroon kun je door, en op water kun je alleen als het ijs dik geno
 Shift 12 m/s.
 
 De omgeving is alleen decor: het kijkpunt blijft binnen het werkgebied, de camera hooguit 150 m daarbuiten en
-niet hoger dan 1200 m.
+niet hoger dan 1200 m. Ze bestaat uit een ring van 6 × 6 km (gebouwen met dakvormen, bomen met seizoenen, water)
+en een buitenzone van 10 × 10 km (blokgebouwen en water, met de Noordzee op −0,4 m NAP).
 
 Bediening: slepen = verschuiven, draaien = rechter muisknop, Ctrl/Shift+slepen, twee vingers op een trackpad,
 toetsen `Q`/`E` of de draaiknoppen in het paneel (`R`/`F` kantelen, knop of kompas = noorden boven),
@@ -77,7 +78,8 @@ bouwjaar, BGT-maquette in plaats van luchtfoto.
 | Bomen | Boomregister gemeente Haarlem (soort, leeftijd, kroonklasse) gekoppeld aan BGT-boompunten, plus automatische detectie in DSM-DTM | 1011 bomen met soort, 352 BGT-punten zonder soort, 6465 gedetecteerde tuinbomen (indicatief); hoogte uit AHN; klik op een boom voor soort en leeftijd |
 | Water, wegen, groen | Kadaster 3D Basisvoorziening 2025 (BGT-vlakken met hoogte) | water altijd zichtbaar; wegen/groen als "maquette"-laag |
 | Buurtgrens, straatnamen | CBS Wijken en Buurten 2025, BGT openbareruimtelabels | |
-| Omgeving (ring) | AHN DTM 5 m, luchtfoto 1,5 m/px, Kadaster LoD 1.2 (blokken), BGT-waterdelen | 6 × 6 km rond de wijk, grof en niet bevliegbaar: terrein met gat voor het werkgebied, ca. 61 duizend blokgebouwen inclusief schuurtjes, dakkleur uit de foto, water op oeverhoogte; `build_context.py` |
+| Omgeving, ring | AHN DTM/DSM 5 m, luchtfoto 1,5 m/px, Kadaster LoD 2.2, BGT-waterdelen en -boompunten, boomregister Haarlem | 6 × 6 km rond de wijk, grof en niet bevliegbaar: terrein op 10 m met gat voor het werkgebied, 61 duizend panden met dakvorm inclusief schuurtjes (dakkleur uit de foto, gevels neutraal, vlakke schaduw), water op oeverhoogte, 51 duizend bomen (44 duizend BGT-punten, waarvan 37 duizend met soort uit het register, 6,5 duizend gedetecteerd in DSM−DTM) als eenvoudige kronen zonder takken, en dichte bossen (5,5 km², vooral de duinen) als kroonlaag op de DSM-hoogte; panden en bomen binnen 400–600 m van de wijk werpen schaduw; `build_context.py` |
+| Omgeving, buitenzone | AHN DTM 10 m, luchtfoto 2,5 m/px, Kadaster LoD 1.2 (blokken), BGT-waterdelen | 10 × 10 km met gat voor de ring: terrein op 20 m, 53 duizend blokgebouwen, 5 duizend watervlakken; grote gaten in het AHN (zee, Mooie Nel) op −0,4 m NAP; `build_context.py buiten` |
 
 Coördinaten: RD New (EPSG:28992) met NAP-hoogtes, verschoven naar lokaal nulpunt RD (101800, 488600).
 In het model is x = oost, y = omhoog, z = zuid (glTF-conventie). Werkgebied RD 101100–102500 / 488000–489200.
@@ -113,7 +115,9 @@ Pipeline:
 5. `build_textures.py` – WebP-texturen per patch.
 6. `build_trees.py` – trees.glb (kronen, stammen en takkensilhouetten), trees.json en species.json.
 7. `build_misc.py` – buurtgrens.json, labels.json, scene.json.
-8. `build_context.py` – omgeving: context_terrain.glb en context_objects.glb (ring van 6 × 6 km).
+8. `build_context.py` – omgeving in stappen `ring`, `bomen`, `buiten` (standaard alle drie): context_terrain.glb,
+   context_objects.glb, context_trees.glb (ring 6 × 6 km) en context_outer_terrain.glb, context_outer_objects.glb
+   (buitenzone 10 × 10 km). Draai `bomen` na `build_trees.py`, omdat species.json wordt aangevuld.
 9. `optimize.sh` – terrein vereenvoudigen en meshopt-compressie (gltf-transform). `buildings.glb` blijft
    ongecomprimeerd omdat het `_BID`-attribuut exact moet blijven.
 
@@ -161,6 +165,9 @@ of een eigen kleur. Daarna `build_buildings.py` opnieuw draaien.
 - Automatisch gedetecteerde bomen zijn een benadering uit het hoogtemodel (winteropname): aantal, hoogte en
   kroonmaat zijn indicatief; dichte bosranden worden als rijen bollen weergegeven.
 - Het terrein is het maaiveld; bruggen en viaducten zijn als BGT-vlak aanwezig maar niet als volume.
+- De omgeving is grof: bomen zonder takkenmodel (kale kronen worden doorzichtig bruin), bossen als kroonlaag,
+  soorten alleen binnen Haarlem (elders BGT-punten zonder soort en detectie in het hoogtemodel), gevels in één
+  neutrale kleur. De hele scène is circa 6,6 M driehoeken; op een oudere laptop kan de laag Omgeving uit.
 - Gevelkleuren zijn een schatting per bouwperiode, geen meting; de dakkleur komt wel uit de luchtfoto
   (winteropname, dus incl. mos en zonnepanelen, licht opgehaald in verzadiging).
 
