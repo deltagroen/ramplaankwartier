@@ -96,6 +96,7 @@ function currentSunDate() {
   return d;
 }
 function setSun(date) {
+  applySeason(date);
   const p = SunCalc.getPosition(date, lat, lon);   // azimuth: 0 = zuid, +west; altitude in rad
   const ca = Math.cos(p.altitude);
   const dir = new THREE.Vector3(-Math.sin(p.azimuth) * ca, Math.sin(p.altitude), Math.cos(p.azimuth) * ca); // x oost, y omhoog, z zuid
@@ -131,12 +132,13 @@ function showProgress() {
   $('#barfill').style.width = (t ? 100 * l / t : 0) + '%';
   $('#progress').textContent = `Model laden… ${(l / 1e6).toFixed(1)} MB`;
 }
+let VER = '';   // cache-buster: bouwdatum uit scene.json, zodat browsers na een update de nieuwe modelbestanden laden
 function loadGLB(name) {
-  return new Promise((res, rej) => loader.load(MODEL + name, res,
+  return new Promise((res, rej) => loader.load(MODEL + name + VER, res,
     (e) => { progress[name] = [e.loaded, e.total || e.loaded]; showProgress(); }, rej));
 }
 async function fetchJSON(u) {
-  const r = await fetch(u);
+  const r = await fetch(u + (u.endsWith('scene.json') ? '' : VER), { cache: u.endsWith('scene.json') ? 'no-cache' : 'default' });
   if (!r.ok) throw new Error(`${u}: ${r.status}`);
   return r.json();
 }
@@ -190,9 +192,62 @@ function setupBuildings(root, info) {
   layers.gebouwen.add(root);
 }
 
+let tMesh = null, tOrig = null, tSeason = null, tCrown = null, seasonKey = null;
 function setupTrees(root) {
-  root.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; o.material.roughness = 0.95; o.material.metalness = 0; } });
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = o.receiveShadow = true;
+    o.material.roughness = 0.95; o.material.metalness = 0;
+    tMesh = o;
+    const g = o.geometry;
+    tOrig = g.getAttribute('color').array.slice();
+    tSeason = g.getAttribute('_season');
+    tCrown = g.getAttribute('_crown');
+  });
   layers.bomen.add(root);
+  applySeason(currentSunDate());
+}
+
+// ---------- seizoenen: bladkleur en bladbezetting van de bomen volgen de datum ----------
+function seasonState(date) {
+  const doy = (date - new Date(date.getFullYear(), 0, 1)) / 86400000;
+  const ss = (x, a, b) => THREE.MathUtils.smoothstep(x, a, b);
+  const leafOut = ss(doy, 88, 132);                       // uitlopen eind maart - begin mei
+  const leaf = Math.min(leafOut, 1 - ss(doy, 292, 330));  // bladval half oktober - eind november
+  return { leaf, autumn: ss(doy, 266, 304), spring: leafOut * (1 - ss(doy, 128, 170)) };
+}
+function applySeason(date) {
+  if (!tMesh || !tSeason || !tCrown) return;
+  const key = date.getFullYear() * 1000 + Math.floor((date - new Date(date.getFullYear(), 0, 1)) / 86400000);
+  if (key === seasonKey) return;
+  seasonKey = key;
+  const { leaf, autumn, spring } = seasonState(date);
+  const col = tMesh.geometry.getAttribute('color');
+  const arr = col.array, k = col.itemSize;
+  let anyAlpha = false;
+  for (let i = 0; i < col.count; i++) {
+    if (tCrown.getX(i) < 0.5) continue;                   // stammen veranderen niet
+    const r = tSeason.getX(i);
+    if (r > 0.85) continue;                                // groenblijvend
+    let R = tOrig[i * k] / 255, G = tOrig[i * k + 1] / 255, B = tOrig[i * k + 2] / 255;
+    const sp = spring * 0.5;                               // lente: lichter en frisser groen
+    R = R * (1 - sp) + 0.38 * sp; G = G * (1 - sp) + 0.60 * sp; B = B * (1 - sp) + 0.10 * sp;
+    const t = (r * 7.31) % 1;                              // per boom andere herfstkleur en -timing
+    const ac = t < 0.33 ? [0.62, 0.42, 0.05] : t < 0.66 ? [0.55, 0.17, 0.04] : [0.28, 0.30, 0.07];
+    const a = THREE.MathUtils.clamp(autumn * (0.55 + 0.9 * ((r * 3.7) % 1)), 0, 1);
+    R = R * (1 - a) + ac[0] * a; G = G * (1 - a) + ac[1] * a; B = B * (1 - a) + ac[2] * a;
+    const bare = 1 - leaf;                                 // winter: kale, grijsbruine kroon
+    R = R * (1 - bare) + 0.16 * bare; G = G * (1 - bare) + 0.13 * bare; B = B * (1 - bare) + 0.10 * bare;
+    arr[i * k] = Math.round(R * 255); arr[i * k + 1] = Math.round(G * 255); arr[i * k + 2] = Math.round(B * 255);
+    if (k === 4) {
+      const alpha = 0.28 + 0.72 * Math.min(1, leaf * (0.8 + 0.4 * ((r * 5.1) % 1)));
+      arr[i * k + 3] = Math.round(alpha * 255);
+      if (alpha < 0.995) anyAlpha = true;
+    }
+  }
+  col.needsUpdate = true;
+  const m = tMesh.material;
+  if (m.alphaHash !== anyAlpha) { m.alphaHash = anyAlpha; m.transparent = false; m.needsUpdate = true; }
 }
 
 function setupWater(root) {
@@ -372,7 +427,7 @@ function stepFly(dt) {
 $('#btnOverzicht').addEventListener('click', () => flyTo(HOME.target, HOME.pos));
 
 // ---------- dag afspelen: zon van opkomst tot ondergang met een willekeurige, botsingsvrije vlucht ----------
-const DAY = { playing: false, p: 0, duration: 110, start: null, end: null, N: 2400, P: null, T: null, knots: null,
+const DAY = { playing: false, p: 0, duration: 130, start: null, end: null, N: 2400, P: null, T: null, knots: null,
               panelWasCollapsed: false, street: null };
 let SM = null, SARR = null, STREETS = [];
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -414,28 +469,41 @@ function buildDay(date) {
     const r = rnd(230, 470);
     tour.push({ pos: V3(C.x + Math.cos(ang) * r, rnd(45, 190), C.z + Math.sin(ang) * r), tgt: randTgt(), w: 1, ang });
   }
-  // Eén korte lage pas door een straatcorridor (uit streets.json), ingevoegd waar de lus er het dichtst bij komt
+  // Eén korte lage pas door een straatcorridor of over water (uit streets.json), ingevoegd waar de lus er het
+  // dichtst bij komt, met aanvlieg- en uitvliegpunten in het verlengde van de corridor voor een rechte aanloop.
   DAY.street = null;
   const inside = (q, m) => q[0] > -424 - m && q[0] < 433 + m && q[2] > -381 - m && q[2] < 328 + m;
   const cands = STREETS.filter((s) => [s.a, s.b].every((q) => inside(q, s.type === 'water' ? 200 : 40)));
   if (cands.length) {
     const s = cands[Math.floor(Math.random() * cands.length)];
-    const flip = Math.random() < 0.5;
-    const A = V3(...(flip ? s.b : s.a)), B = V3(...(flip ? s.a : s.b));
-    const ab = B.clone().sub(A);
-    const L = ab.length();
-    const d = ab.clone().normalize();
-    const mid = A.clone().addScaledVector(d, L / 2);
+    const sa = V3(...s.a), sb = V3(...s.b);
+    const mid = sa.clone().add(sb).multiplyScalar(0.5);
     const angM = Math.atan2(mid.z - C.z, mid.x - C.x);
     let best = 0, bestD = Infinity;
     tour.forEach((w, i) => { const dd = Math.abs(Math.atan2(Math.sin(w.ang - angM), Math.cos(w.ang - angM))); if (dd < bestD) { bestD = dd; best = i; } });
+    // richting van de pas: die met de minste draai vanaf het vorige en naar het volgende punt van de lus
+    const prev = tour[best].pos, next = (tour[best + 1] || { pos: V3(500, 100, -30) }).pos;
+    const turnCost = (P0, P1) => {
+      const dd = P1.clone().sub(P0).normalize();
+      const inDir = P0.clone().addScaledVector(dd, -P1.distanceTo(P0)).sub(prev); inDir.y = 0;
+      const outDir = next.clone().sub(P1.clone().addScaledVector(dd, P1.distanceTo(P0))); outDir.y = 0;
+      const flat = V3(dd.x, 0, dd.z).normalize();
+      return Math.acos(THREE.MathUtils.clamp(inDir.normalize().dot(flat), -1, 1)) + Math.acos(THREE.MathUtils.clamp(flat.dot(outDir.normalize()), -1, 1));
+    };
+    const flip = turnCost(sb, sa) < turnCost(sa, sb);
+    const A = flip ? sb : sa, B = flip ? sa : sb;
+    const ab = B.clone().sub(A);
+    const L = ab.length();
+    const d = ab.clone().normalize();
     const at = (f, h) => { const q = A.clone().addScaledVector(d, L * f); q.y = groundHeight(q.x, q.z) + h; return q; };
-    const ahead = at(1.0, 6), beyond = B.clone().addScaledVector(d, 150); beyond.y = groundHeight(beyond.x, beyond.z) + 12;
+    const far = at(1.0, 6);
     const pass = [
-      { pos: at(0.0, 20), tgt: ahead, w: 1.5, street: true },
-      { pos: at(0.25, 8), tgt: ahead, w: 2, street: true },
-      { pos: at(0.75, 8), tgt: beyond, w: 2, street: true },
-      { pos: at(1.0, 20), tgt: beyond, w: 1.5, street: true },
+      { pos: at(-1.0, 60), tgt: far, w: 1.2, street: true },      // aanvliegpunt, 1 corridorlengte ervoor
+      { pos: at(0.0, 24), tgt: far, w: 1.5, street: true },
+      { pos: at(0.3, 8), tgt: far, w: 2, street: true },
+      { pos: at(0.7, 8), tgt: at(2.0, 10), w: 2, street: true },
+      { pos: at(1.0, 24), tgt: at(2.0, 10), w: 1.5, street: true },
+      { pos: at(2.0, 60), tgt: at(3.0, 20), w: 1.2, street: true },  // uitvliegpunt
     ];
     tour.splice(best + 1, 0, ...pass);
     DAY.street = { A, B, d, L };
@@ -445,7 +513,7 @@ function buildDay(date) {
   const setTgt = setCam.clone().addScaledVector(set, 700);
   const endCam = setCam.clone().add(V3(-40, 6, -50));
   // Tijdverdeling: vertrek bij 0.13, vaste momenten voor zonsopkomst (0.075) en -ondergang (0.955); daartussen
-  // naar rato van de afgelegde afstand (gewicht w maakt de straatpas langzamer).
+  // naar rato van de afgelegde afstand (gewicht w maakt de lage pas langzamer).
   const depart = riseCam.clone().lerp(tour[0].pos, 0.12); depart.y = riseCam.y + 5;
   const moving = [{ pos: depart, tgt: riseCam.clone().addScaledVector(rise, 700).lerp(tour[0].tgt, 0.3), w: 1 }, ...tour,
                   { pos: setCam, tgt: setTgt, w: 1 }];
@@ -459,15 +527,15 @@ function buildDay(date) {
   DAY.knots = keys.map((k) => k.p);
   const posCurve = new THREE.CatmullRomCurve3(keys.map((k) => k.pos), false, 'centripetal', 0.5);
   const tgtCurve = new THREE.CatmullRomCurve3(keys.map((k) => k.tgt), false, 'centripetal', 0.5);
-  // Dicht bemonsteren en de hoogte botsingsvrij maken: minstens 12 m boven het hoogste object binnen 6 m,
-  // behalve in de straatcorridor (8 m boven de weg, met op- en afrit in het eerste en laatste kwart).
-  const N = DAY.N, P = new Float32Array(N * 3), T = new Float32Array(N * 3), req = new Float32Array(N);
+
+  // Dicht bemonsteren
+  const N = DAY.N, P = new Float32Array(N * 3), T0 = new Float32Array(N * 3), need = new Float32Array(N);
   const q = new THREE.Vector3();
   for (let i = 0; i < N; i++) {
     const u = dayU(i / (N - 1));
     posCurve.getPoint(u, q); P[i * 3] = q.x; P[i * 3 + 1] = q.y; P[i * 3 + 2] = q.z;
-    tgtCurve.getPoint(u, q); T[i * 3] = q.x; T[i * 3 + 1] = q.y; T[i * 3 + 2] = q.z;
-    req[i] = surfaceMax(P[i * 3], P[i * 3 + 2], 6) + 12;
+    tgtCurve.getPoint(u, q); T0[i * 3] = q.x; T0[i * 3 + 1] = q.y; T0[i * 3 + 2] = q.z;
+    need[i] = surfaceMax(P[i * 3], P[i * 3 + 2], 6) + 12;
   }
   const smooth = (arr, k, op) => {            // lopend maximum of gemiddelde over +-k monsters
     const out = new Float32Array(arr.length);
@@ -478,28 +546,129 @@ function buildDay(date) {
     }
     return out;
   };
-  let need = smooth(smooth(req, 20, 'max'), 25, 'avg');
+  // Hoogteprofiel: minstens 12 m boven het hoogste object binnen 6 m (gladgestreken), behalve in de corridor:
+  // daar daalt de baan met een Hermite-overgang (aansluitende helling) naar 8 m boven weg of water en klimt
+  // aan het eind net zo weer op.
+  const needS = smooth(smooth(need, 20, 'max'), 25, 'avg');
+  const base = new Float32Array(N);
+  for (let i = 0; i < N; i++) base[i] = Math.max(P[i * 3 + 1], needS[i]);
   const inStreet = new Uint8Array(N);
   if (DAY.street) {
     const { A, d, L } = DAY.street;
+    let i0 = -1, i1 = -1;
     for (let i = 0; i < N; i++) {
       const pi = i / (N - 1);
-      if (pi < pIn || pi > pOut) continue;          // alleen het stuk van de vlucht dat de straatpas is
+      if (pi < pIn || pi > pOut) continue;
       const dx = P[i * 3] - A.x, dz = P[i * 3 + 2] - A.z;
       const along = dx * d.x + dz * d.z, lat = Math.abs(dx * d.z - dz * d.x);
-      const f = along / L;
-      if (f >= 0 && f <= 1 && lat < 6) {
-        const ramp = Math.max(0, 1 - Math.min(f, 1 - f) / 0.25);
-        need[i] = groundHeight(P[i * 3], P[i * 3 + 2]) + 8 + 14 * ramp * ramp;
+      if (along >= 0 && along <= L && lat < 6) { if (i0 < 0) i0 = i; i1 = i; }
+    }
+    if (i0 >= 8 && i1 > i0 + 20 && i1 < N - 8) {
+      const span = i1 - i0, ramp = 0.35;
+      const hIn = base[i0], hOut = base[i1];
+      const mIn = (base[i0] - base[i0 - 8]) / 8 * (ramp * span);      // helling bij binnenkomst, per eenheid t
+      const mOut = (base[i1 + 8] - base[i1]) / 8 * (ramp * span);
+      const hermite = (t, y0, m0, y1, m1) => {
+        const t2 = t * t, t3 = t2 * t;
+        return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * m1;
+      };
+      for (let i = i0; i <= i1; i++) {
+        const f = (i - i0) / span;
+        const g = groundHeight(P[i * 3], P[i * 3 + 2]) + 8;
+        let y = g;
+        if (f < ramp) y = hermite(f / ramp, hIn, mIn, g, 0);
+        else if (f > 1 - ramp) y = hermite((f - (1 - ramp)) / ramp, g, 0, hOut, mOut);
+        base[i] = Math.max(y, g - 1);
         inStreet[i] = 1;
       }
     }
   }
-  const y0 = new Float32Array(N);
-  for (let i = 0; i < N; i++) y0[i] = Math.max(P[i * 3 + 1], need[i]);
-  const y1 = smooth(y0, 12, 'avg');
-  for (let i = 0; i < N; i++) P[i * 3 + 1] = inStreet[i] ? need[i] : Math.max(y1[i], need[i]);
-  DAY.P = P; DAY.T = T;
+  const y1 = smooth(base, 10, 'avg');
+  for (let i = 0; i < N; i++) {
+    const g = groundHeight(P[i * 3], P[i * 3 + 2]);
+    P[i * 3 + 1] = inStreet[i] ? Math.max(y1[i], g + 6) : Math.max(y1[i], needS[i]);
+  }
+
+  // Herbemonstering op booglengte voor de bewegende fase (0.13 .. 0.955): constante snelheid, met een
+  // geleidelijke vertraging tot 45% in de corridor. Daardoor geen snelheidssprongen bij de sleutelpunten.
+  const streetW = smooth(Float32Array.from(inStreet), 40, 'avg');
+  const iA = Math.round(0.13 * (N - 1)), iB = Math.round(0.955 * (N - 1));
+  // In scherpe bochten langzamer (zoals een drone die inzet): factor uit de richtingsverandering per meter
+  const bend = new Float32Array(N);
+  for (let i = 1; i < N - 1; i++) {
+    const ax = P[i * 3] - P[(i - 1) * 3], az = P[i * 3 + 2] - P[(i - 1) * 3 + 2], bx = P[(i + 1) * 3] - P[i * 3], bz = P[(i + 1) * 3 + 2] - P[i * 3 + 2];
+    const la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+    if (la > 0.01 && lb > 0.01) bend[i] = Math.acos(THREE.MathUtils.clamp((ax * bx + az * bz) / (la * lb), -1, 1)) / ((la + lb) / 2);
+  }
+  const bendS = smooth(bend, 40, 'avg');
+  const cost = new Float32Array(N);
+  for (let i = iA + 1; i <= iB; i++) {
+    const step = Math.hypot(P[i * 3] - P[(i - 1) * 3], P[i * 3 + 1] - P[(i - 1) * 3 + 1], P[i * 3 + 2] - P[(i - 1) * 3 + 2]);
+    const speed = Math.min(1 - 0.55 * streetW[i], 1 / (1 + 35 * bendS[i]));
+    cost[i] = cost[i - 1] + step / Math.max(0.35, speed);
+  }
+  const costTotal = cost[iB];
+  const P2 = P.slice(), T02 = T0.slice(), inStreet2 = inStreet.slice();
+  for (let k = iA; k <= iB; k++) {
+    const want = costTotal * (k - iA) / (iB - iA);
+    let lo = iA, hi = iB;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cost[m] <= want) lo = m; else hi = m; }
+    const seg = cost[hi] - cost[lo], s = seg > 0 ? (want - cost[lo]) / seg : 0;
+    for (let c = 0; c < 3; c++) {
+      P2[k * 3 + c] = P[lo * 3 + c] * (1 - s) + P[hi * 3 + c] * s;
+      T02[k * 3 + c] = T0[lo * 3 + c] * (1 - s) + T0[hi * 3 + c] * s;
+    }
+    inStreet2[k] = inStreet[s < 0.5 ? lo : hi];
+  }
+
+  // Kijkrichting: naar een punt 160 m verderop op de baan, zodat het hoofd meedraait in de richting waarin
+  // daarna gevlogen wordt; het kijkpunt ligt wat lager zodat de wijk in beeld blijft. In de vaste begin- en
+  // eindfase gelden de expliciete kijkpunten (zonsopkomst, zonsondergang).
+  const arc = new Float32Array(N);
+  for (let i = 1; i < N; i++) arc[i] = arc[i - 1] + Math.hypot(P2[i * 3] - P2[(i - 1) * 3], P2[i * 3 + 1] - P2[(i - 1) * 3 + 1], P2[i * 3 + 2] - P2[(i - 1) * 3 + 2]);
+  const T2 = new Float32Array(N * 3);
+  let j = 0;
+  for (let i = 0; i < N; i++) {
+    while (j < N - 1 && arc[j] - arc[i] < 200) j++;
+    let tx, ty, tz;
+    if (j > i && arc[j] - arc[i] >= 100) {
+      tx = P2[j * 3]; ty = P2[j * 3 + 1]; tz = P2[j * 3 + 2];
+    } else {                                       // bijna aan het eind: richting van de laatste 60 m doortrekken
+      let k = i; while (k > 0 && arc[i] - arc[k] < 60) k--;
+      const dx = P2[i * 3] - P2[k * 3], dy = P2[i * 3 + 1] - P2[k * 3 + 1], dz = P2[i * 3 + 2] - P2[k * 3 + 2];
+      const l = Math.hypot(dx, dy, dz) || 1;
+      tx = P2[i * 3] + dx / l * 160; ty = P2[i * 3 + 1] + dy / l * 160; tz = P2[i * 3 + 2] + dz / l * 160;
+    }
+    const g = groundHeight(tx, tz);
+    ty = g + (ty - g) * (inStreet2[i] ? 0.8 : 0.45);
+    T2[i * 3] = tx; T2[i * 3 + 1] = ty; T2[i * 3 + 2] = tz;
+  }
+  // Glad maken; aan begin en eind de kijkrichting geleidelijk (slerp) van en naar de zon draaien,
+  // zodat er geen snelle zwaai ontstaat bij de overgang naar de vaste kijkpunten.
+  const smT = [0, 1, 2].map((c) => { const col = new Float32Array(N); for (let i = 0; i < N; i++) col[i] = T2[i * 3 + c]; return smooth(col, 45, 'avg'); });
+  const slerp = (a, b, t) => {
+    const d = THREE.MathUtils.clamp(a.dot(b), -1, 1), ang = Math.acos(d);
+    if (ang < 1e-4) return b.clone();
+    return a.clone().multiplyScalar(Math.sin((1 - t) * ang) / Math.sin(ang)).addScaledVector(b, Math.sin(t * ang) / Math.sin(ang));
+  };
+  const gdir = new THREE.Vector3();
+  const maxStep = THREE.MathUtils.degToRad(35) * DAY.duration / (N - 1);   // max. 35 graden per seconde
+  let prevDir = null;
+  for (let i = 0; i < N; i++) {
+    const pi = i / (N - 1);
+    if (pi < 0.075 || pi > 0.955) { T2[i * 3] = T02[i * 3]; T2[i * 3 + 1] = T02[i * 3 + 1]; T2[i * 3 + 2] = T02[i * 3 + 2]; continue; }
+    gdir.set(smT[0][i] - P2[i * 3], smT[1][i] - P2[i * 3 + 1], smT[2][i] - P2[i * 3 + 2]).normalize();
+    let dir = slerp(rise, gdir, THREE.MathUtils.smoothstep(pi, 0.13, 0.21));   // 0.075-0.13: blik op de opkomende zon
+    dir = slerp(dir, set, THREE.MathUtils.smoothstep(pi, 0.88, 0.955));
+    if (prevDir) {                                                              // niet sneller draaien dan maxStep
+      const ang = Math.acos(THREE.MathUtils.clamp(prevDir.dot(dir), -1, 1));
+      if (ang > maxStep) dir = slerp(prevDir, dir, maxStep / ang);
+    }
+    prevDir = dir.clone();
+    T2[i * 3] = P2[i * 3] + dir.x * 150; T2[i * 3 + 1] = P2[i * 3 + 1] + dir.y * 150; T2[i * 3 + 2] = P2[i * 3 + 2] + dir.z * 150;
+  }
+  DAY.P = P2; DAY.T = T2;
+  DAY.debug = { needS, inStreet: inStreet2, streetW, cost };
 }
 function dayU(p) {   // voortgang -> curveparameter, zodat de sleutelmomenten precies op hun tijd vallen
   const k = DAY.knots, n = k.length - 1;
@@ -714,11 +883,12 @@ window.addEventListener('resize', () => {
 // ---------- start ----------
 async function init() {
   const meta = await fetchJSON(MODEL + 'scene.json');
+  VER = '?v=' + encodeURIComponent(meta.gebouwd || '');
   [lon, lat] = meta.origin_lonlat;
   HM = meta.heights;
-  HARR = new Uint16Array(await (await fetch(MODEL + 'heights_2m.u16')).arrayBuffer());
+  HARR = new Uint16Array(await (await fetch(MODEL + 'heights_2m.u16' + VER)).arrayBuffer());
   SM = meta.surface || null;
-  if (SM) SARR = new Uint16Array(await (await fetch(MODEL + 'surface_4m.u16')).arrayBuffer());
+  if (SM) SARR = new Uint16Array(await (await fetch(MODEL + 'surface_4m.u16' + VER)).arrayBuffer());
   STREETS = await fetchJSON(MODEL + 'streets.json').catch(() => []);
   const s = meta.stats || {};
   $('#stats').textContent = `${s.gebouwen ?? '?'} panden · ${(s.bomen_bgt || 0) + (s.bomen_gedetecteerd || 0)} bomen · model van ${(meta.gebouwd || '').slice(0, 10)}`;
@@ -738,7 +908,7 @@ async function init() {
   animate();
   startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonState };
 
 init().catch((e) => {
   console.error(e);

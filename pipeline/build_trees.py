@@ -163,9 +163,10 @@ def main():
     print(f"bomen: {len(bgt_xy)} uit BGT, {detected} gedetecteerd in kroonhoogtemodel")
 
     # Geometrie
-    P, N, Col, I = [], [], [], []
+    P, N, Col, I, SEAS, CROWN = [], [], [], [], [], []
     n = 0
     for x, y, h, r, src in trees:
+        seas = float(rng.random())            # per boom: bepaalt herfstkleur en of de boom groenblijvend is
         zg = float(T.sample(dtm, tr, [x], [y])[0])
         lx, _, lz = C.to_local(x, y, 0.0)
         hb = 0.28 * h if h > 5 else 0.22 * h            # kroonbasis
@@ -177,6 +178,7 @@ def main():
         v[:, 1] = v[:, 1] * (hb + 0.5 + 0.3) + (zg - 0.5)
         v[:, 0] += lx; v[:, 2] += lz
         P.append(v); N.append(CYL_N.copy()); Col.append(np.tile((0.34, 0.26, 0.18), (len(v), 1)))
+        SEAS.append(np.full(len(v), seas, np.float32)); CROWN.append(np.zeros(len(v), np.float32))
         I.append(CYL_F + n); n += len(v)
         # kroon (ellipsoïde met wat ruis)
         bump = 1.0 + 0.10 * (rng.random(len(SPH_V)) - 0.5)
@@ -186,11 +188,14 @@ def main():
         nn /= np.linalg.norm(nn, axis=1, keepdims=True)
         g = np.array((0.26, 0.42, 0.17)) * (1.0 + 0.22 * (rng.random(3) - 0.5))
         P.append(v); N.append(nn); Col.append(np.tile(np.clip(g, 0, 1), (len(v), 1)))
+        SEAS.append(np.full(len(v), seas, np.float32)); CROWN.append(np.ones(len(v), np.float32))
         I.append(SPH_F + n); n += len(v)
     Pm, Nm, Cm, Im = np.vstack(P), np.vstack(N), np.vstack(Col), np.vstack(I)
+    Cm = np.hstack([Cm, np.ones((len(Cm), 1))])      # RGBA: alfa stuurt in de viewer de bladbezetting per seizoen
     w = GLBWriter()
     m = w.add_material("bomen", roughness=0.95)
-    w.add_mesh("bomen", Pm, Im, m, normals=Nm, colors=Cm)
+    w.add_mesh("bomen", Pm, Im, m, normals=Nm, colors=Cm,
+               custom={"_SEASON": np.concatenate(SEAS), "_CROWN": np.concatenate(CROWN)})
     size = w.write(C.MODEL / "trees.glb")
     out = {"bgt": int(len(bgt_xy)), "detected": int(detected),
            "trees": [[round(C.to_local(x, y, 0)[0], 1), round(C.to_local(x, y, 0)[2], 1), round(h, 1), round(r, 1), src]

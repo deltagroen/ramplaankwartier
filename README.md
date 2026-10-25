@@ -35,8 +35,16 @@ eindigt vanaf de oostkant kijkend naar de ondergaande zon (circa 110 seconden, d
 wordt elke keer willekeurig gegenereerd; begin- en eindpunt liggen vast. De baan blijft minstens 12 m boven het
 hoogste object binnen 6 m (gebouwen, bomen, masten, uit een 4 m-oppervlaktegrid van het DSM), met één korte lage pas
 op 8 m door een rechte straat of over een brede watergang zonder obstakels binnen 3,5 m (`model/streets.json`,
-berekend in `build_misc.py`). Tijdens het vliegen zijn het paneel ingeklapt en de straatnamen uit. Elke muis- of
-toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het opnieuw.
+berekend in `build_misc.py`). De camera kijkt vooruit, naar een punt 200 m verderop op de baan, zodat het hoofd
+meedraait in de richting waarin daarna gevlogen wordt (hoogstens 35 graden per seconde); de snelheid is constant,
+met vertraging in scherpe bochten en in de lage pas. Tijdens het vliegen zijn het paneel ingeklapt en de
+straatnamen uit. Elke muis- of toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het
+opnieuw.
+
+De bomen volgen het seizoen van de gekozen datum: uitlopen in april (fris lichtgroen), zomergroen, verkleuring
+vanaf eind september per boom naar geel, oranjebruin of olijf, bladval in oktober en november, en in de winter
+kale, ijle grijsbruine kronen. Circa 15% van de bomen is groenblijvend. De verdeling staat in `build_trees.py`
+(attributen `_SEASON` en `_CROWN`), de kleuring in `applySeason()` in `viewer/app.js`.
 
 Bediening: slepen = verschuiven, draaien = rechter muisknop, Ctrl/Shift+slepen, twee vingers op een trackpad,
 toetsen `Q`/`E` of de draaiknoppen in het paneel (`R`/`F` kantelen, knop of kompas = noorden boven),
@@ -51,7 +59,7 @@ bouwjaar, BGT-maquette in plaats van luchtfoto.
 | Terrein | AHN DTM 0,5 m via PDOK WCS (actuele AHN; hier AHN5, gevlogen 2023) | 1 m-grid, vereenvoudigd tot ca. 0,8 M driehoeken, gaten gevuld, water ingebrand |
 | Luchtfoto | Luchtfoto Beeldmateriaal NL 2026, 8 cm (PDOK WMS, laag `2026_orthoHR`) | 16 texturen van 2048², ingebed in terrain.glb |
 | Gebouwen | Kadaster 3D Basisvoorziening 2025, LoD 2.2 (CityJSON) | 2730 panden, met bouwjaar en BAG-id; dakkleur = mediaankleur van de luchtfoto binnen het dak; gevelkleur = schatting op bouwjaar, afmeting en dakkleur (zie hieronder); 1,5 m onder maaiveld doorgetrokken |
-| Bomen | BGT-boompunten (gemeentelijk) + automatische detectie in DSM-DTM | hoogte uit AHN; particuliere tuinbomen zijn automatisch gedetecteerd en dus indicatief |
+| Bomen | BGT-boompunten (gemeentelijk) + automatische detectie in DSM-DTM | hoogte uit AHN; particuliere tuinbomen zijn automatisch gedetecteerd en dus indicatief; kleur en bladbezetting volgen het seizoen |
 | Water, wegen, groen | Kadaster 3D Basisvoorziening 2025 (BGT-vlakken met hoogte) | water altijd zichtbaar; wegen/groen als "maquette"-laag |
 | Buurtgrens, straatnamen | CBS Wijken en Buurten 2025, BGT openbareruimtelabels | |
 
