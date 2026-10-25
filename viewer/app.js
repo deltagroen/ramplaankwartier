@@ -234,11 +234,17 @@ function stepRain(dt) {
   const p = rainGeo.attributes.position.array;
   for (let i = 0; i < RAIN_N; i++) {
     let y = p[i * 6 + 1] - 16 * dt;
-    if (y < 0) { y += 90; p[i * 6] = (Math.random() - 0.5) * 120; p[i * 6 + 2] = (Math.random() - 0.5) * 120; }
+    if (y < 0) {                                           // druppel terug naar boven, beide eindpunten op dezelfde plek
+      y += 90;
+      const x = (Math.random() - 0.5) * 120, z = (Math.random() - 0.5) * 120;
+      p[i * 6] = x; p[i * 6 + 2] = z; p[i * 6 + 3] = x; p[i * 6 + 5] = z;
+    }
     p[i * 6 + 1] = y; p[i * 6 + 4] = y - 1.4;
   }
   rainGeo.attributes.position.needsUpdate = true;
   rain.position.set(camera.position.x, Math.max(camera.position.y - 45, groundHeight(camera.position.x, camera.position.z)), camera.position.z);
+  const high = THREE.MathUtils.clamp(1 - (camera.position.y - 250) / 400, 0, 1);   // op grote hoogte minder nadrukkelijk
+  rain.material.opacity = rain.userData.opacity * high;
 }
 
 // Weer toepassen op licht, lucht, mist en wolken; `day` = daglichtfactor uit setSun
@@ -266,7 +272,7 @@ function applyWeather(date, day, sunDir) {
   cloudMat.uniforms.dens.value = 0.75 + 0.25 * cloud;
   cloudPlane.visible = cloud > 0.03;
   rain.visible = precip > 0.1;
-  rain.material.opacity = Math.min(0.5, 0.2 + 0.15 * precip);
+  rain.userData.opacity = Math.min(0.5, 0.2 + 0.15 * precip);
   const desc = precip > 0.1 ? `regen ${precip.toFixed(1).replace('.', ',')} mm/u` : vis < 1500 ? 'mist' : cloud > 0.85 ? 'bewolkt' : cloud > 0.45 ? 'halfbewolkt' : cloud > 0.15 ? 'licht bewolkt' : 'helder';
   return `${desc}${w.source === 'schatting' ? ' (schatting)' : ''}`;
 }
