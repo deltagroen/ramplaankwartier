@@ -932,7 +932,7 @@ $('#btnOverzicht').addEventListener('click', () => flyTo(HOME.target, HOME.pos))
 
 // ---------- dag afspelen: zon van opkomst tot ondergang met een willekeurige, botsingsvrije vlucht ----------
 const DAY = { playing: false, p: 0, duration: 130, start: null, end: null, N: 2400, P: null, T: null, knots: null,
-              panelWasCollapsed: false, street: null };
+              panelWasCollapsed: false, street: null, labelsAfter: 0 };   // labelsAfter: straatnamen pas weer na dit tijdstip
 let SM = null, SARR = null, STREETS = [], GRENS = null;   // GRENS: buurtpolygoon als [x, z]-punten
 const rnd = (a, b) => a + Math.random() * (b - a);
 const DAY_C = { x: 5, z: -27 };                            // middelpunt van de buurt (lokaal: x oost, z zuid)
@@ -1237,6 +1237,7 @@ function startDay() {
   DAY.playing = true;
   controls.enabled = false;
   DAY.panelWasCollapsed = $('#panel').classList.contains('collapsed');
+  layers.buurtgrens.visible = true;                 // tijdens de vlucht is de buurtgrens zichtbaar
   $('#panel').classList.add('collapsed');
   $('#collapse').textContent = '+';
   $('#dayplay').innerHTML = '&#x25A0; Stop';
@@ -1249,6 +1250,8 @@ function stopDay() {
   controls.target.copy(dayTgt);
   controls.update();
   camPrev.copy(camera.position);
+  layers.buurtgrens.visible = state.layers.buurtgrens;   // terug naar de stand van het vinkje
+  DAY.labelsAfter = performance.now() + 5000;            // straatnamen niet meteen terug, pas na 5 s
   if (!DAY.panelWasCollapsed) { $('#panel').classList.remove('collapsed'); $('#collapse').textContent = '–'; }
   $('#dayplay').innerHTML = '&#x25B6; Dag afspelen';
 }
@@ -1405,7 +1408,7 @@ function updateLabels() {
   const best = new Map();   // per naam het dichtstbijzijnde label
   for (const l of labelObjs) {
     l.visible = false;
-    if (DAY.playing) continue;                 // tijdens het vliegen geen straatnamen
+    if (DAY.playing || performance.now() < DAY.labelsAfter) continue;   // tijdens en vlak na het vliegen geen straatnamen
     const d = camera.position.distanceTo(l.position);
     if (!on || d > maxD) continue;
     const b = best.get(l.userData.name);
