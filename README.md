@@ -77,7 +77,7 @@ bouwjaar, BGT-maquette in plaats van luchtfoto.
 | Bomen | Boomregister gemeente Haarlem (soort, leeftijd, kroonklasse) gekoppeld aan BGT-boompunten, plus automatische detectie in DSM-DTM | 1011 bomen met soort, 352 BGT-punten zonder soort, 6465 gedetecteerde tuinbomen (indicatief); hoogte uit AHN; klik op een boom voor soort en leeftijd |
 | Water, wegen, groen | Kadaster 3D Basisvoorziening 2025 (BGT-vlakken met hoogte) | water altijd zichtbaar; wegen/groen als "maquette"-laag |
 | Buurtgrens, straatnamen | CBS Wijken en Buurten 2025, BGT openbareruimtelabels | |
-| Omgeving (ring) | AHN DTM 5 m, luchtfoto 1,5 m/px, Kadaster LoD 1.2 (blokken), BGT-waterdelen | 6 × 6 km rond de wijk, grof en niet bevliegbaar: terrein met gat voor het werkgebied, ca. 40 duizend blokgebouwen met dakkleur uit de foto (schuurtjes onder 25 m² weggelaten), water op oeverhoogte; `build_context.py` |
+| Omgeving (ring) | AHN DTM 5 m, luchtfoto 1,5 m/px, Kadaster LoD 1.2 (blokken), BGT-waterdelen | 6 × 6 km rond de wijk, grof en niet bevliegbaar: terrein met gat voor het werkgebied, ca. 61 duizend blokgebouwen inclusief schuurtjes, dakkleur uit de foto, water op oeverhoogte; `build_context.py` |
 
 Coördinaten: RD New (EPSG:28992) met NAP-hoogtes, verschoven naar lokaal nulpunt RD (101800, 488600).
 In het model is x = oost, y = omhoog, z = zuid (glTF-conventie). Werkgebied RD 101100–102500 / 488000–489200.

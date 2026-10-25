@@ -138,8 +138,6 @@ def main():
             if aminx <= cxy[0] <= amaxx and aminy <= cxy[1] <= amaxy:
                 continue                                        # zit al in het gedetailleerde model
             seen.add(ident)
-            if abs(Polygon(V[ring][:, :2]).area) < 25:          # schuurtjes zijn op deze afstand onzichtbaar
-                continue
             parts = [cos[c] for c in co.get("children", []) if c in cos] or [co]
             roof_tris, wall_tris = [], []
             for part in parts:
