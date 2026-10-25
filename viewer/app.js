@@ -169,7 +169,7 @@ async function fetchWeather(d) {
   return hours;
 }
 function weatherAt(date) {
-  if (WX.mode !== 'echt') return { ...WX_PRESETS[WX.mode], source: 'ingesteld' };
+  if (WX.mode !== 'echt') return { ...(WX_PRESETS[WX.mode] || WX_PRESETS.helder), source: 'ingesteld' };
   const key = dateKey(date);
   if (WX.date !== key) {                                                  // nieuwe dag: ophalen, tot dan klimatologie
     WX.date = key; WX.hours = climatology(date); WX.source = 'schatting';
@@ -1307,7 +1307,8 @@ window.addEventListener('resize', () => {
 // ---------- start ----------
 async function init() {
   const meta = await fetchJSON(MODEL + 'scene.json');
-  VER = '?v=' + encodeURIComponent(meta.gebouwd || '');
+  const scriptVer = new URL(import.meta.url).searchParams.get('v');   // versie uit de deploy (git-commit), anders bouwdatum
+  VER = '?v=' + encodeURIComponent(scriptVer && scriptVer !== '__VERSION__' ? scriptVer : (meta.gebouwd || ''));
   [lon, lat] = meta.origin_lonlat;
   HM = meta.heights;
   HARR = new Uint16Array(await (await fetch(MODEL + 'heights_2m.u16' + VER)).arrayBuffer());
