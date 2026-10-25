@@ -921,8 +921,8 @@ function buildDay(date) {
     const pass = [
       { pos: at(-1.0, 60), tgt: far, w: 1.2, street: true },      // aanvliegpunt, 1 corridorlengte ervoor
       { pos: at(0.0, 24), tgt: far, w: 1.5, street: true },
-      { pos: at(0.3, 8), tgt: far, w: 2, street: true },
-      { pos: at(0.7, 8), tgt: at(2.0, 10), w: 2, street: true },
+      { pos: at(0.3, 12), tgt: far, w: 2, street: true },
+      { pos: at(0.7, 12), tgt: at(2.0, 10), w: 2, street: true },
       { pos: at(1.0, 24), tgt: at(2.0, 10), w: 1.5, street: true },
       { pos: at(2.0, 60), tgt: at(3.0, 20), w: 1.2, street: true },  // uitvliegpunt
     ];
@@ -968,7 +968,7 @@ function buildDay(date) {
     return out;
   };
   // Hoogteprofiel: minstens 12 m boven het hoogste object binnen 6 m (gladgestreken), behalve in de corridor:
-  // daar daalt de baan met een Hermite-overgang (aansluitende helling) naar 8 m boven weg of water en klimt
+  // daar daalt de baan met een Hermite-overgang (aansluitende helling) naar 12 m boven weg of water en klimt
   // aan het eind net zo weer op.
   const needS = smooth(smooth(need, 20, 'max'), 25, 'avg');
   const base = new Float32Array(N);
@@ -995,7 +995,7 @@ function buildDay(date) {
       };
       for (let i = i0; i <= i1; i++) {
         const f = (i - i0) / span;
-        const g = groundHeight(P[i * 3], P[i * 3 + 2]) + 8;
+        const g = groundHeight(P[i * 3], P[i * 3 + 2]) + 12;        // lage pas: 12 m boven weg of water
         let y = g;
         if (f < ramp) y = hermite(f / ramp, hIn, mIn, g, 0);
         else if (f > 1 - ramp) y = hermite((f - (1 - ramp)) / ramp, g, 0, hOut, mOut);
@@ -1007,7 +1007,7 @@ function buildDay(date) {
   const y1 = smooth(base, 10, 'avg');
   for (let i = 0; i < N; i++) {
     const g = groundHeight(P[i * 3], P[i * 3 + 2]);
-    P[i * 3 + 1] = inStreet[i] ? Math.max(y1[i], g + 6) : Math.max(y1[i], needS[i]);
+    P[i * 3 + 1] = inStreet[i] ? Math.max(y1[i], g + 10) : Math.max(y1[i], needS[i]);
   }
 
   // Herbemonstering op booglengte voor de bewegende fase (0.13 .. 0.955): constante snelheid, met een

@@ -34,7 +34,7 @@ de opkomende zon, vliegt een lus om en door de wijk op wisselende hoogtes terwij
 eindigt vanaf de oostkant kijkend naar de ondergaande zon (circa 110 seconden, datum uit het datumveld). De lus
 wordt elke keer willekeurig gegenereerd; begin- en eindpunt liggen vast. De baan blijft minstens 12 m boven het
 hoogste object binnen 6 m (gebouwen, bomen, masten, uit een 4 m-oppervlaktegrid van het DSM), met één korte lage pas
-op 8 m door een rechte straat of over een brede watergang zonder obstakels binnen 3,5 m (`model/streets.json`,
+op 12 m door een rechte straat of over een brede watergang zonder obstakels binnen 3,5 m (`model/streets.json`,
 berekend in `build_misc.py`). De camera kijkt vooruit, naar een punt 200 m verderop op de baan, zodat het hoofd
 meedraait in de richting waarin daarna gevlogen wordt (hoogstens 35 graden per seconde); de snelheid is constant,
 met vertraging in scherpe bochten en in de lage pas. Tijdens het vliegen zijn het paneel ingeklapt en de
