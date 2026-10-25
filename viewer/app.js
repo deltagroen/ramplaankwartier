@@ -767,6 +767,7 @@ function setupMaquette(root) {
 }
 
 function setupGrens(data) {
+  if (data.lijnen.length) GRENS = data.lijnen[0].map((p) => [p[0], p[2]]);
   const mat = new THREE.MeshBasicMaterial({ color: 0xff7a00, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   for (const line of data.lijnen) {
     const pts = line.map((p) => new THREE.Vector3(p[0], p[1] + 0.3, p[2]));
@@ -932,8 +933,35 @@ $('#btnOverzicht').addEventListener('click', () => flyTo(HOME.target, HOME.pos))
 // ---------- dag afspelen: zon van opkomst tot ondergang met een willekeurige, botsingsvrije vlucht ----------
 const DAY = { playing: false, p: 0, duration: 130, start: null, end: null, N: 2400, P: null, T: null, knots: null,
               panelWasCollapsed: false, street: null };
-let SM = null, SARR = null, STREETS = [];
+let SM = null, SARR = null, STREETS = [], GRENS = null;   // GRENS: buurtpolygoon als [x, z]-punten
 const rnd = (a, b) => a + Math.random() * (b - a);
+const DAY_C = { x: 5, z: -27 };                            // middelpunt van de buurt (lokaal: x oost, z zuid)
+function grensRadius(ang) {   // afstand van het middelpunt tot de buurtgrens in richting ang
+  if (!GRENS) return 350;
+  const dx = Math.cos(ang), dz = Math.sin(ang);
+  let best = 0;
+  for (let i = 0; i < GRENS.length; i++) {
+    const [ax, az] = GRENS[i], [bx, bz] = GRENS[(i + 1) % GRENS.length];
+    const ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = ((ax - DAY_C.x) * ez - (az - DAY_C.z) * ex) / den;   // afstand langs de straal
+    const u = ((ax - DAY_C.x) * dz - (az - DAY_C.z) * dx) / den;   // positie op het grenssegment
+    if (t > 0 && u >= 0 && u <= 1) best = Math.max(best, t);
+  }
+  return best || 350;
+}
+function grensDist(x, z) {    // afstand tot de buurtgrens, negatief binnen de buurt
+  if (!GRENS) return -1;
+  let inside = false, m = Infinity;
+  for (let i = 0, j = GRENS.length - 1; i < GRENS.length; j = i++) {
+    const [ax, az] = GRENS[i], [bx, bz] = GRENS[j];
+    if ((az > z) !== (bz > z) && x < (bx - ax) * (z - az) / (bz - az) + ax) inside = !inside;
+    const ex = bx - ax, ez = bz - az, L2 = ex * ex + ez * ez || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2));
+    m = Math.min(m, Math.hypot(x - ax - t * ex, z - az - t * ez));
+  }
+  return inside ? -m : m;
+}
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 function surfaceMax(x, z, r = 6) {   // hoogste punt (gebouw, boom, mast) binnen r m, uit het 4 m-oppervlaktegrid
   if (!SM) return groundHeight(x, z);
@@ -953,14 +981,16 @@ function buildDay(date) {
   DAY.start = new Date(t.sunrise.getTime() - 20 * 60000);
   DAY.end = new Date(t.sunset.getTime() + 20 * 60000);
   const rise = sunDirAt(t.sunrise, 0.03), set = sunDirAt(t.sunset, 0.025);
-  const C = V3(5, 0, -27);                                   // middelpunt van de buurt (lokaal: x oost, z zuid)
+  const C = V3(DAY_C.x, 0, DAY_C.z);
   const keys = [];
-  // Vast begin: recht boven de wijk, kantelen, zonsopkomst vanaf de westkant
-  const riseCam = V3(rnd(-600, -480), rnd(55, 85), rnd(40, 260));
+  // Vast begin: recht boven de wijk, kantelen, zonsopkomst vanaf de westkant, 40-110 m buiten de buurtgrens
+  const edgeCam = (ang, h) => { const r = grensRadius(ang) + rnd(40, 110); return V3(C.x + Math.cos(ang) * r, h, C.z + Math.sin(ang) * r); };
+  const riseCam = edgeCam(Math.PI + rnd(-0.1, 0.4), rnd(55, 85));
   keys.push({ p: 0.000, pos: V3(5, 900, 10), tgt: V3(5, 0, -60) });
   keys.push({ p: 0.040, pos: V3(-300, 380, 220), tgt: V3(20, 0, -60) });
   keys.push({ p: 0.075, pos: riseCam, tgt: riseCam.clone().addScaledVector(rise, 700) });
-  // Willekeurige lus: van west naar oost, anderhalve ronde om en door de wijk op wisselende hoogtes
+  // Willekeurige lus: van west naar oost, anderhalve ronde om en door de wijk op wisselende hoogtes; de straal
+  // volgt de buurtpolygoon (55-100% van de afstand tot de grens, hooguit 30 m erbuiten)
   const dir = Math.random() < 0.5 ? 1 : -1;
   const n = 4 + Math.floor(Math.random() * 3);
   const a0 = Math.atan2(riseCam.z - C.z, riseCam.x - C.x);
@@ -969,14 +999,14 @@ function buildDay(date) {
   const tour = [];
   for (let i = 1; i <= n; i++) {
     const ang = a0 + dir * total * (i / (n + 1));
-    const r = rnd(230, 470);
+    const r = Math.max(150, grensRadius(ang) * rnd(0.55, 1.0) + rnd(-10, 30));
     tour.push({ pos: V3(C.x + Math.cos(ang) * r, rnd(45, 190), C.z + Math.sin(ang) * r), tgt: randTgt(), w: 1, ang });
   }
-  // Eén korte lage pas door een straatcorridor of over water (uit streets.json), ingevoegd waar de lus er het
-  // dichtst bij komt, met aanvlieg- en uitvliegpunten in het verlengde van de corridor voor een rechte aanloop.
+  // Eén korte lage pas door een straatcorridor of over water (uit streets.json) met beide einden binnen 40 m
+  // (water: 150 m) van de buurtgrens, ingevoegd waar de lus er het dichtst bij komt, met aanvlieg- en
+  // uitvliegpunten in het verlengde van de corridor (hooguit 120 m) voor een rechte aanloop.
   DAY.street = null;
-  const inside = (q, m) => q[0] > -424 - m && q[0] < 433 + m && q[2] > -381 - m && q[2] < 328 + m;
-  const cands = STREETS.filter((s) => [s.a, s.b].every((q) => inside(q, s.type === 'water' ? 200 : 40)));
+  const cands = STREETS.filter((s) => [s.a, s.b].every((q) => grensDist(q[0], q[2]) <= (s.type === 'water' ? 150 : 40)));
   if (cands.length) {
     const s = cands[Math.floor(Math.random() * cands.length)];
     const sa = V3(...s.a), sb = V3(...s.b);
@@ -998,21 +1028,27 @@ function buildDay(date) {
     const ab = B.clone().sub(A);
     const L = ab.length();
     const d = ab.clone().normalize();
-    const at = (f, h) => { const q = A.clone().addScaledVector(d, L * f); q.y = groundHeight(q.x, q.z) + h; return q; };
-    const far = at(1.0, 6);
+    const atd = (m, h) => { const q = A.clone().addScaledVector(d, m); q.y = groundHeight(q.x, q.z) + h; return q; };
+    const extent = (sign) => {        // aanloop in het verlengde: tot 120 m, maar hooguit 60 m buiten de buurtgrens
+      let e = Math.min(L, 120);
+      for (; e > 40; e -= 10) { const q = atd(sign > 0 ? L + e : -e, 0); if (grensDist(q.x, q.z) <= 60) break; }
+      return e;
+    };
+    const extIn = extent(-1), extOut = extent(1);
+    const far = atd(L, 6);
     const pass = [
-      { pos: at(-1.0, 60), tgt: far, w: 1.2, street: true },      // aanvliegpunt, 1 corridorlengte ervoor
-      { pos: at(0.0, 24), tgt: far, w: 1.5, street: true },
-      { pos: at(0.3, 12), tgt: far, w: 2, street: true },
-      { pos: at(0.7, 12), tgt: at(2.0, 10), w: 2, street: true },
-      { pos: at(1.0, 24), tgt: at(2.0, 10), w: 1.5, street: true },
-      { pos: at(2.0, 60), tgt: at(3.0, 20), w: 1.2, street: true },  // uitvliegpunt
+      { pos: atd(-extIn, 60), tgt: far, w: 1.2, street: true },                 // aanvliegpunt
+      { pos: atd(0, 24), tgt: far, w: 1.5, street: true },
+      { pos: atd(0.3 * L, 12), tgt: far, w: 2, street: true },
+      { pos: atd(0.7 * L, 12), tgt: atd(L + extOut, 10), w: 2, street: true },
+      { pos: atd(L, 24), tgt: atd(L + extOut, 10), w: 1.5, street: true },
+      { pos: atd(L + extOut, 60), tgt: atd(L + 2 * extOut, 20), w: 1.2, street: true },  // uitvliegpunt
     ];
     tour.splice(best + 1, 0, ...pass);
     DAY.street = { A, B, d, L };
   }
-  // Vast einde: zonsondergang vanaf de oostkant, kijkend over de wijk
-  const setCam = V3(rnd(440, 560), rnd(90, 130), rnd(-160, 100));
+  // Vast einde: zonsondergang vanaf de oostkant, 40-110 m buiten de buurtgrens, kijkend over de wijk
+  const setCam = edgeCam(rnd(-0.4, 0.25), rnd(90, 130));
   const setTgt = setCam.clone().addScaledVector(set, 700);
   const endCam = setCam.clone().add(V3(-40, 6, -50));
   // Tijdverdeling: vertrek bij 0.13, vaste momenten voor zonsopkomst (0.075) en -ondergang (0.955); daartussen
@@ -1448,7 +1484,7 @@ async function init() {
   for (const f of ['context_terrain.glb', 'context_objects.glb', 'context_trees.glb', 'context_outer_terrain.glb', 'context_outer_objects.glb'])
     chain = chain.then(() => loadGLB(f).then(setupContext).catch((e) => console.warn(f, e)));
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, seasonSets, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, seasonSets, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked, buildDay, grensRadius, grensDist, STREETS };
 
 init().catch((e) => {
   console.error(e);

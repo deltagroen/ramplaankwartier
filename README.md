@@ -35,7 +35,9 @@ eindigt vanaf de oostkant kijkend naar de ondergaande zon (circa 110 seconden, d
 wordt elke keer willekeurig gegenereerd; begin- en eindpunt liggen vast. De baan blijft minstens 12 m boven het
 hoogste object binnen 6 m (gebouwen, bomen, masten, uit een 4 m-oppervlaktegrid van het DSM), met één korte lage pas
 op 12 m door een rechte straat of over een brede watergang zonder obstakels binnen 3,5 m (`model/streets.json`,
-berekend in `build_misc.py`). De camera kijkt vooruit, naar een punt 200 m verderop op de baan, zodat het hoofd
+berekend in `build_misc.py`). De lus volgt de CBS-buurtgrens: de vluchtpunten liggen op 55–100% van de afstand van het
+middelpunt tot de grens (hooguit 30 m erbuiten), begin- en eindpunt 40–110 m erbuiten, en de aanloop van de lage pas
+hooguit 60 m erbuiten; alleen corridors met beide einden binnen 40 m (water 150 m) van de grens komen in aanmerking. De camera kijkt vooruit, naar een punt 200 m verderop op de baan, zodat het hoofd
 meedraait in de richting waarin daarna gevlogen wordt (hoogstens 35 graden per seconde); de snelheid is constant,
 met vertraging in scherpe bochten en in de lage pas. Tijdens het vliegen zijn het paneel ingeklapt en de
 straatnamen uit. Elke muis- of toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het
