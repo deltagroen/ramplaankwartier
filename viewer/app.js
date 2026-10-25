@@ -10,7 +10,7 @@ const MODEL = './model/';
 const $ = (s) => document.querySelector(s);
 
 const state = {
-  layers: { gebouwen: true, bomen: true, water: true, buurtgrens: true, labels: true, maquette: false,
+  layers: { gebouwen: true, bomen: true, water: true, buurtgrens: false, labels: true, maquette: false,
             bouwjaar: false, schaduw: true },
   walking: false, selected: null, flying: null,
 };
@@ -426,6 +426,7 @@ const layers = {
 };
 for (const g of Object.values(layers)) scene.add(g);
 layers.maquette.visible = false;
+layers.buurtgrens.visible = false;
 
 const terrainMeshes = [];
 const plainMat = new THREE.MeshStandardMaterial({ color: 0xcfc8b8, roughness: 1 });
