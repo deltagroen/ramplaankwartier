@@ -339,7 +339,7 @@ function applyWeather(date, day, sunDir) {
   su.rayleigh.value = 2.0 - 0.8 * cloud;
   scene.fog.near = THREE.MathUtils.clamp(0.25 * vis, 80, 2500);
   scene.fog.far = THREE.MathUtils.clamp(1.3 * vis, 600, 14000);
-  const fogGrey = 0.45 + 0.5 * day;
+  const fogGrey = 0.09 + 0.86 * day;                                         // 's nachts donkere nevel, geen grijze band
   scene.fog.color.setRGB(fogGrey * (0.86 + 0.1 * (1 - cloud)), fogGrey * 0.9, fogGrey * (0.96 + 0.04 * (1 - cloud)));
   const sunLow = THREE.MathUtils.clamp(1 - sunDir.y * 6, 0, 1) * day;      // lage zon kleurt de wolken
   const base = 0.98 - 0.42 * cloud;
