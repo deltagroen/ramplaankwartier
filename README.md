@@ -116,8 +116,14 @@ om de camera die per kijkrichting de snijding met dat vlak bemonstert, zodat het
 en bij een gesloten dek de zon de hele dag onzichtbaar is; een hoge sluier zonder laag dek laat een melkwitte zon
 door. Hetzelfde ruisveld wordt als plat vlak in de schaduwkaart van de zon getekend (eigen dieptemateriaal), dus
 de wolkenschaduwen op de grond zijn de parallelle projectie van dezelfde wolken langs de zonrichting. Verder stuurt
-het weer de sterkte van het zonlicht, de nevel (zicht) en regenstrepen. In het paneel kan het weer worden
-vastgezet: helder, halfbewolkt, sluierbewolking, bewolkt, regen of mist.
+het weer de sterkte van het zonlicht, de nevel (zicht) en regenstrepen. Temperatuur, sneeuwval en sneeuwhoogte
+komen ook uit Open-Meteo: neerslag onder de 1,5 graad valt als vlokken, en de sneeuwhoogte van het weermodel
+(die blijven liggen en smelten al meeneemt) wordt een wit dek op alles wat naar boven kijkt, via een kleine
+toevoeging aan de standaardshader (`enableSnow()`), dus op daken, wegen, velden en kronen maar niet op gevels.
+IJs volgt uit de vorstsom van de voorgaande twaalf dagen (daggemiddelden onder nul opgeteld, dooi telt anderhalf
+keer tegen): vanaf 8 graaddagen dun ijs, bij 25 een dichte laag; bevroren water wordt mat, licht grijsblauw en
+ondoorzichtig, met sneeuw erop als die er ligt. In het paneel kan het weer worden vastgezet: helder, halfbewolkt,
+sluierbewolking, bewolkt, regen, mist of sneeuw en ijs. Probeer bijvoorbeeld 10 februari 2021.
 
 ## Gevelkleuren
 

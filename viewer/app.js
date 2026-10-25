@@ -92,12 +92,13 @@ function groundHeight(x, z) {
 const WX = { mode: 'echt', date: null, hours: null, source: '', cache: new Map(), pending: null, time: 0,
              cur: { cloud: 0.2, precip: 0, vis: 20000, fog: 0 } };
 const WX_PRESETS = {
-  helder: { cloud: 0.05, thick: 0.05, thin: 0, precip: 0, vis: 30000 },
-  halfbewolkt: { cloud: 0.5, thick: 0.5, thin: 0, precip: 0, vis: 18000 },
-  sluierbewolking: { cloud: 0.9, thick: 0.1, thin: 0.9, precip: 0, vis: 20000 },
-  bewolkt: { cloud: 1.0, thick: 1.0, thin: 0, precip: 0, vis: 9000 },
-  regen: { cloud: 1.0, thick: 1.0, thin: 0, precip: 1.5, vis: 4000 },
-  mist: { cloud: 0.7, thick: 0.7, thin: 0, precip: 0, vis: 700 },
+  helder: { cloud: 0.05, thick: 0.05, thin: 0, precip: 0, vis: 30000, temp: 15, snow: 0, snowfall: 0, ice: 0 },
+  halfbewolkt: { cloud: 0.5, thick: 0.5, thin: 0, precip: 0, vis: 18000, temp: 14, snow: 0, snowfall: 0, ice: 0 },
+  sluierbewolking: { cloud: 0.9, thick: 0.1, thin: 0.9, precip: 0, vis: 20000, temp: 12, snow: 0, snowfall: 0, ice: 0 },
+  bewolkt: { cloud: 1.0, thick: 1.0, thin: 0, precip: 0, vis: 9000, temp: 10, snow: 0, snowfall: 0, ice: 0 },
+  regen: { cloud: 1.0, thick: 1.0, thin: 0, precip: 1.5, vis: 4000, temp: 9, snow: 0, snowfall: 0, ice: 0 },
+  mist: { cloud: 0.7, thick: 0.7, thin: 0, precip: 0, vis: 700, temp: 4, snow: 0, snowfall: 0, ice: 0 },
+  sneeuw: { cloud: 1.0, thick: 1.0, thin: 0, precip: 0.4, vis: 2500, temp: -2, snow: 0.06, snowfall: 0.5, ice: 0.8 },
 };
 function dateKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function climatology(d) {   // seizoensgebonden, per dag vast (zelfde dag = zelfde weer)
@@ -105,6 +106,9 @@ function climatology(d) {   // seizoensgebonden, per dag vast (zelfde dag = zelf
   let seed = d.getFullYear() * 367 + Math.floor(doy) * 31 + 11;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
   const meanCloud = 0.62 + 0.12 * Math.cos((doy - 15) / 365 * Math.PI * 2);     // winter bewolkter
+  const meanTemp = 10.5 - 7.5 * Math.cos((doy - 20) / 365 * Math.PI * 2) + (rnd() - 0.5) * 6;
+  const cold = meanTemp < 0.5 && rnd() < 0.5;                                       // zo nu en dan een vorstperiode
+  const ice = cold ? rnd() * 0.8 : 0;
   const wet = rnd() < 0.3 + 0.15 * Math.cos((doy - 300) / 365 * Math.PI * 2);
   const foggy = rnd() < (doy > 260 || doy < 60 ? 0.12 : 0.04);
   let c = THREE.MathUtils.clamp(meanCloud + (rnd() - 0.5) * 0.8, 0, 1);
@@ -114,7 +118,10 @@ function climatology(d) {   // seizoensgebonden, per dag vast (zelfde dag = zelf
     const precip = wet && c > 0.7 && rnd() < 0.45 ? 0.3 + rnd() * 2 : 0;
     const vis = foggy && h >= 4 && h <= 10 ? 400 + rnd() * 1200 : precip ? 4000 + rnd() * 4000 : 12000 + rnd() * 18000;
     const thin = rnd() < 0.35 ? rnd() * 0.8 : 0;
-    hours.push({ cloud: Math.max(c, thin * 0.9), thick: c, thin, precip, vis });
+    const temp = meanTemp - 2.5 * Math.cos((h - 15) / 24 * Math.PI * 2);
+    const snowfall = precip > 0 && temp < 1.5 ? precip : 0;
+    hours.push({ cloud: Math.max(c, thin * 0.9), thick: c, thin, precip: snowfall ? 0 : precip, vis, temp,
+                 snowfall, snow: cold && rnd() < 0.6 ? 0.03 + rnd() * 0.06 : 0, ice });
   }
   return hours;
 }
@@ -123,28 +130,41 @@ async function fetchWeather(d) {
   if (WX.cache.has(key)) return WX.cache.get(key);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const diff = (d - today) / 86400000;
-  let url, vars;
+  const from = new Date(d); from.setDate(from.getDate() - 12);        // 12 dagen terug voor de vorstsom (ijs)
+  const fromKey = dateKey(from);
+  let url;
+  const daily = 'temperature_2m_mean';
   if (diff >= -90 && diff <= 15) {
-    vars = 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,visibility,weather_code';
-    url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&timezone=Europe%2FAmsterdam&start_date=${key}&end_date=${key}`;
+    const vars = 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,visibility,weather_code,temperature_2m,snowfall,snow_depth';
+    url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&daily=${daily}&timezone=Europe%2FAmsterdam&start_date=${fromKey}&end_date=${key}`;
   } else if (diff < -90) {
-    vars = 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,weather_code';
-    url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&hourly=${vars}&timezone=Europe%2FAmsterdam&start_date=${key}&end_date=${key}`;
+    const vars = 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,weather_code,temperature_2m,snowfall,snow_depth';
+    url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&hourly=${vars}&daily=${daily}&timezone=Europe%2FAmsterdam&start_date=${fromKey}&end_date=${key}`;
   } else {
     return null;                                                         // te ver in de toekomst
   }
   const r = await fetch(url);
   if (!r.ok) throw new Error('weer ' + r.status);
   const j = await r.json();
+  // IJs: vorstsom over de voorgaande dagen; dooi haalt er anderhalf keer zo snel vanaf
+  let frost = 0;
+  (j.daily?.temperature_2m_mean || []).forEach((tm) => { if (tm == null) return; frost = tm < 0 ? frost - tm : Math.max(0, frost - 1.5 * tm); });
+  const ice = THREE.MathUtils.smoothstep(frost, 8, 25);
   const H = j.hourly;
-  const hours = H.time.map((t, i) => {
+  const hours = [];
+  H.time.forEach((t, i) => {
+    if (!t.startsWith(key)) return;
     const code = H.weather_code ? H.weather_code[i] : 0;
     let vis = H.visibility ? H.visibility[i] : (code === 45 || code === 48 ? 600 : 15000);
     if (vis == null) vis = 15000;
     const lo = (H.cloud_cover_low?.[i] ?? 0) / 100, mi = (H.cloud_cover_mid?.[i] ?? 0) / 100, hi = (H.cloud_cover_high?.[i] ?? 0) / 100;
     const thick = H.cloud_cover_low ? 1 - (1 - lo) * (1 - mi) : (H.cloud_cover[i] ?? 50) / 100;
-    return { cloud: (H.cloud_cover[i] ?? 50) / 100, thick, thin: H.cloud_cover_high ? hi : 0, precip: H.precipitation[i] ?? 0, vis };
+    const snowfall = H.snowfall?.[i] ?? 0;                               // cm/uur
+    hours.push({ cloud: (H.cloud_cover[i] ?? 50) / 100, thick, thin: H.cloud_cover_high ? hi : 0,
+                 precip: Math.max(0, (H.precipitation[i] ?? 0) - snowfall * 0.7), vis,
+                 temp: H.temperature_2m?.[i] ?? 10, snowfall, snow: H.snow_depth?.[i] ?? 0, ice });
   });
+  if (hours.length < 24) return null;
   WX.cache.set(key, hours);
   return hours;
 }
@@ -159,7 +179,8 @@ function weatherAt(date) {
   const t = date.getHours() + date.getMinutes() / 60;
   const i = Math.min(23, Math.floor(t)), f = t - i, a = WX.hours[i], b = WX.hours[Math.min(23, i + 1)];
   const mix = (k) => a[k] * (1 - f) + b[k] * f;
-  return { cloud: mix('cloud'), thick: mix('thick'), thin: mix('thin'), precip: mix('precip'), vis: mix('vis'), source: WX.source };
+  return { cloud: mix('cloud'), thick: mix('thick'), thin: mix('thin'), precip: mix('precip'), vis: mix('vis'),
+           temp: mix('temp'), snowfall: mix('snowfall'), snow: mix('snow'), ice: a.ice ?? 0, source: WX.source };
 }
 let seasonWeatherDirty = false;
 
@@ -250,7 +271,25 @@ cloudPlane.customDepthMaterial = new THREE.ShaderMaterial({     // wolkenschaduw
 });
 scene.add(cloudPlane);
 
-// Regen: korte vallende strepen rond de camera
+// Sneeuwdek: witte laag op vlakken die naar boven kijken, via een kleine toevoeging aan de standaardshader
+const SNOW = { value: 0 };
+function enableSnow(material, mask = 1) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uSnow = SNOW;
+    shader.uniforms.uSnowMask = { value: mask };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uSnow; uniform float uSnowMask;')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        float snowUp = smoothstep(0.3, 0.8, inverseTransformDirection(normal, viewMatrix).y);
+        float snowK = uSnow * uSnowMask * snowUp;
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.93, 0.96), snowK);
+        roughnessFactor = mix(roughnessFactor, 0.95, snowK);`);
+  };
+  material.customProgramCacheKey = () => 'snow' + mask;
+  material.needsUpdate = true;
+}
+
+// Regen of sneeuw: korte vallende strepen (regen) of trage vlokjes (sneeuw) rond de camera
 const RAIN_N = 1600, rainPos = new Float32Array(RAIN_N * 2 * 3);
 for (let i = 0; i < RAIN_N; i++) {
   const x = (Math.random() - 0.5) * 120, y = Math.random() * 90, z = (Math.random() - 0.5) * 120;
@@ -264,14 +303,17 @@ scene.add(rain);
 function stepRain(dt) {
   if (!rain.visible) return;
   const p = rainGeo.attributes.position.array;
+  const snowing = rain.userData.snow;
+  const fall = snowing ? 1.6 : 16, len = snowing ? 0.25 : 1.4;
   for (let i = 0; i < RAIN_N; i++) {
-    let y = p[i * 6 + 1] - 16 * dt;
+    let y = p[i * 6 + 1] - fall * dt;
+    if (snowing) { p[i * 6] += Math.sin(cloudMat.uniforms.time.value * 1.3 + i) * 0.4 * dt; p[i * 6 + 3] = p[i * 6]; }
     if (y < 0) {                                           // druppel terug naar boven, beide eindpunten op dezelfde plek
       y += 90;
       const x = (Math.random() - 0.5) * 120, z = (Math.random() - 0.5) * 120;
       p[i * 6] = x; p[i * 6 + 2] = z; p[i * 6 + 3] = x; p[i * 6 + 5] = z;
     }
-    p[i * 6 + 1] = y; p[i * 6 + 4] = y - 1.4;
+    p[i * 6 + 1] = y; p[i * 6 + 4] = y - len;
   }
   rainGeo.attributes.position.needsUpdate = true;
   rain.position.set(camera.position.x, Math.max(camera.position.y - 45, groundHeight(camera.position.x, camera.position.z)), camera.position.z);
@@ -306,10 +348,18 @@ function applyWeather(date, day, sunDir) {
   cloudMat.uniforms.dens.value = thick > 0.02 ? 0.8 + 0.2 * thick : 0.45 + 0.2 * thin;   // sluier blijft doorschijnend
   cloudMat.uniforms.haze.value.copy(scene.fog.color);
   cloudPlane.visible = cloud > 0.03; cloudDome.visible = cloud > 0.03;
-  rain.visible = precip > 0.1;
-  rain.userData.opacity = Math.min(0.5, 0.2 + 0.15 * precip);
-  const desc = precip > 0.1 ? `regen ${precip.toFixed(1).replace('.', ',')} mm/u` : vis < 1500 ? 'mist' : thick > 0.85 ? 'bewolkt' : thinOnly > 0.5 ? 'sluierbewolking' : cloud > 0.45 ? 'halfbewolkt' : cloud > 0.15 ? 'licht bewolkt' : 'helder';
-  return `${desc}${w.source === 'schatting' ? ' (schatting)' : ''}`;
+  const temp = w.temp ?? 10, snowfall = Math.max(0, w.snowfall ?? 0), snow = Math.max(0, w.snow ?? 0), ice = THREE.MathUtils.clamp(w.ice ?? 0, 0, 1);
+  const snowing = snowfall > 0.05 || (precip > 0.1 && temp < 1.5);
+  rain.visible = snowing || precip > 0.1;
+  rain.userData.snow = snowing;
+  rain.material.color.set(snowing ? 0xffffff : 0xcfd8e4);
+  rain.userData.opacity = snowing ? Math.min(0.9, 0.5 + 0.3 * snowfall) : Math.min(0.5, 0.2 + 0.15 * precip);
+  SNOW.value = THREE.MathUtils.clamp(snow / 0.03, 0, 1);                          // 3 cm = gesloten dek
+  setIce(ice, SNOW.value);
+  const temps = `${Math.round(temp)} °C`;
+  const desc = snowing ? `sneeuw ${snowfall.toFixed(1).replace('.', ',')} cm/u` : precip > 0.1 ? `regen ${precip.toFixed(1).replace('.', ',')} mm/u` : vis < 1500 ? 'mist' : thick > 0.85 ? 'bewolkt' : thinOnly > 0.5 ? 'sluierbewolking' : cloud > 0.45 ? 'halfbewolkt' : cloud > 0.15 ? 'licht bewolkt' : 'helder';
+  const extra = [snow > 0.005 ? `sneeuwdek ${Math.round(snow * 100)} cm` : '', ice > 0.3 ? (ice > 0.8 ? 'ijs' : 'dun ijs') : ''].filter(Boolean).join(', ');
+  return `${temps}, ${desc}${extra ? ', ' + extra : ''}${w.source === 'schatting' ? ' (schatting)' : ''}`;
 }
 
 // ---------- zon ----------
@@ -379,6 +429,7 @@ layers.maquette.visible = false;
 
 const terrainMeshes = [];
 const plainMat = new THREE.MeshStandardMaterial({ color: 0xcfc8b8, roughness: 1 });
+enableSnow(plainMat, 1);
 let bMesh = null, bInfo = [], bCSR = null, bOrig = null, bidAttr = null, colAttr = null, roofAttr = null;
 let labelObjs = [];
 
@@ -392,6 +443,7 @@ function setupTerrain(root) {
     if (m.map) { m.map.anisotropy = maxAniso; m.map.needsUpdate = true; }
     o.userData.photoMat = m;
     o.userData.stdMap = m.map;
+    enableSnow(m, 1);
     terrainMeshes.push(o);
   });
   scene.add(root);
@@ -403,6 +455,7 @@ function setupBuildings(root, info) {
   bMesh.castShadow = bMesh.receiveShadow = true;
   const m = bMesh.material;
   m.vertexColors = true; m.roughness = 0.9; m.metalness = 0;
+  enableSnow(m, 1);
   const g = bMesh.geometry;
   bidAttr = g.getAttribute('_bid');
   roofAttr = g.getAttribute('_roof');
@@ -430,11 +483,13 @@ function setupTrees(root) {
       o.castShadow = true; o.receiveShadow = false;
       const m = o.material;
       m.map = makeTwigTexture(); m.alphaTest = 0.5; m.alphaToCoverage = true; m.alphaHash = false; m.transparent = false;
-      m.side = THREE.DoubleSide; m.vertexColors = true; m.roughness = 1; m.needsUpdate = true;
+      m.side = THREE.DoubleSide; m.vertexColors = true; m.roughness = 1;
+      enableSnow(m, 0.5);
       wSeason = o.geometry.getAttribute('_season'); wSpec = o.geometry.getAttribute('_spec');
     } else {
       tMesh = o;
       o.castShadow = o.receiveShadow = true;
+      enableSnow(o.material, 0.8);
       const g = o.geometry;
       tOrig = g.getAttribute('color').array.slice();
       tSeason = g.getAttribute('_season'); tSpec = g.getAttribute('_spec'); tCrown = g.getAttribute('_crown'); tTid = g.getAttribute('_tid');
@@ -597,14 +652,24 @@ function treeInfoHTML(t) {
   </table>`;
 }
 
+let waterMat = null, waterBase = null;
 function setupWater(root) {
   root.traverse((o) => {
     if (!o.isMesh) return;
     const m = o.material;
     m.transparent = true; m.opacity = 0.82; m.depthWrite = false; m.roughness = 0.12; m.metalness = 0.05;
     o.receiveShadow = true;
+    waterMat = m; waterBase = m.color.clone();
+    enableSnow(m, 1);
   });
   layers.water.add(root);
+}
+function setIce(ice, snow) {          // bevroren water: mat, licht grijsblauw en dicht; sneeuw erop via de shader
+  if (!waterMat) return;
+  waterMat.color.copy(waterBase).lerp(new THREE.Color(0.78, 0.83, 0.87), ice);
+  waterMat.opacity = 0.82 + 0.18 * ice;
+  waterMat.roughness = 0.12 + 0.55 * ice;
+  waterMat.depthWrite = ice > 0.5;
 }
 
 function setupMaquette(root) {
@@ -614,6 +679,7 @@ function setupMaquette(root) {
     m.vertexColors = true; m.roughness = 1; m.metalness = 0;
     m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2;
     o.receiveShadow = true;
+    enableSnow(m, 1);
   });
   layers.maquette.add(root);
 }
@@ -1268,7 +1334,7 @@ async function init() {
   animate();
   startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat, cloudDome, cloudPlane };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW };
 
 init().catch((e) => {
   console.error(e);
