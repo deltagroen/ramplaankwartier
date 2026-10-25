@@ -52,6 +52,12 @@ vier varianten zodat de getekende stam op de stamcilinder aansluit; de takken ve
 Groenblijvende soorten (den, leylandcipres, hulst, taxus) houden hun kroon. Tabel in `pipeline/species.py`,
 toewijzing en kroonvorm (rond, breed, zuil, treur, kegel) in `build_trees.py`, kleuring in `applySeason()`.
 
+Botsingen: de viewer gebruikt een obstakelgrid van 2 m (`model/block_2m.u16`, gemaakt in `build_misc.py`) met per
+cel de boven- en onderkant van gebouwen en boomkronen en een watervlag. Bij het rondkijken kan de camera niet door
+gevels, daken of kronen en niet onder het maaiveld; bij het lopen houden gevels, boomstammen en water je tegen,
+maar onder een kroon kun je door, en op water kun je alleen als het ijs dik genoeg is. Lopen gaat 6 m/s, met
+Shift 12 m/s.
+
 Bediening: slepen = verschuiven, draaien = rechter muisknop, Ctrl/Shift+slepen, twee vingers op een trackpad,
 toetsen `Q`/`E` of de draaiknoppen in het paneel (`R`/`F` kantelen, knop of kompas = noorden boven),
 scrollen = zoomen, pijltjes = verschuiven, klik op een pand = BAG-gegevens, `W` = wandelen (WASD/pijltjes,

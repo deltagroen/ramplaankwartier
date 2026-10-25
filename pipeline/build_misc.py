@@ -145,6 +145,74 @@ def main():
     (C.MODEL / "streets.json").write_text(json.dumps(streets))
     print(f"corridors: {len(streets)} ({sum(1 for q in streets if q['type']=='water')} water) (langste {streets[0]['lengte'] if streets else 0} m, kortste {streets[-1]['lengte'] if streets else 0} m)")
 
+    # Obstakelgrid 2 m voor botsingen in de viewer: per cel bovenkant (dm boven hmin, 10 bits) en onderkant
+    # (m boven maaiveld, 6 bits) van gebouwen en boomkronen; stam- en gebouwcellen hebben onderkant 0; water = 0xFFFF.
+    from shapely.geometry import Polygon
+    heights_meta = json.loads((C.WORK / "heights_meta.json").read_text())
+    hmin = heights_meta["hmin"]
+    bx, bz = int(round((maxx - minx) / 2)) + 1, int(round((maxy - miny) / 2)) + 1
+    btop = np.zeros((bz, bx), np.float64)          # absolute bovenkant (m NAP), 0 = vrij
+    bbase = np.zeros((bz, bx), np.float64)         # onderkant boven maaiveld (m)
+    cell_x = minx + np.arange(bx) * 2.0
+    cell_y = miny + np.arange(bz) * 2.0            # rij 0 = zuidrand, zoals heights_2m
+    btr = __import__("rasterio").transform.Affine(2.0, 0, minx - 1.0, 0, 2.0, miny - 1.0)   # rij j -> y = miny + 2j
+    blocks = json.loads((C.WORK / "building_blocks.json").read_text())
+    if blocks:
+        from rasterio import features as _f
+        shapes = []
+        for ring, ztop in blocks:
+            if len(ring) < 3:
+                continue
+            pg = Polygon(ring).buffer(0)
+            if pg.is_empty:
+                continue
+            shapes.append((pg.buffer(0.6).__geo_interface__, float(ztop)))
+        shapes.sort(key=lambda t: t[1])            # hoogste als laatste, zodat het maximum blijft staan
+        rb = _f.rasterize(shapes, out_shape=(bz, bx), transform=btr, fill=0.0, dtype="float64")
+        btop = np.maximum(btop, rb)
+    trees = json.loads((C.MODEL / "trees.json").read_text())["trees"]
+    species = json.loads((C.MODEL / "species.json").read_text())
+    HB = {"conical": 0.12, "columnar": 0.15, "weeping": 0.22, "small": 0.3}
+    gy, gx = np.mgrid[0:bz, 0:bx]
+    for t in trees:
+        x, y = t["x"] + C.ORIGIN[0], -t["z"] + C.ORIGIN[1]
+        h, r = t["h"], t["r"]
+        shp = species[t["spec"]]["shape"] if t.get("spec") is not None else "round"
+        hb = HB.get(shp, 0.28 if h > 5 else 0.22) * h
+        zg = float(T.sample(dtm, tr, [x], [y])[0])
+        ci, cj = (x - minx) / 2.0, (y - miny) / 2.0
+        k = int(np.ceil(r / 2.0)) + 1
+        i0, i1 = max(int(ci) - k, 0), min(int(ci) + k + 1, bx)
+        j0, j1 = max(int(cj) - k, 0), min(int(cj) + k + 1, bz)
+        if i1 <= i0 or j1 <= j0:
+            continue
+        sub_i, sub_j = gx[j0:j1, i0:i1], gy[j0:j1, i0:i1]
+        dist = np.hypot((sub_i - ci) * 2.0, (sub_j - cj) * 2.0)
+        inside = dist <= r + 1.0
+        top = zg + h
+        cur_top = btop[j0:j1, i0:i1]
+        cur_base = bbase[j0:j1, i0:i1]
+        newcell = inside & (cur_top == 0)
+        cur_base[newcell] = hb
+        cur_top[inside] = np.maximum(cur_top[inside], top)
+        # stam: de cel van de boom zelf blokkeert tot op de grond
+        ti, tj = int(round(ci)), int(round(cj))
+        if 0 <= ti < bx and 0 <= tj < bz:
+            bbase[tj, ti] = 0.0
+            btop[tj, ti] = max(btop[tj, ti], top)
+    water = json.loads((C.WORK / "water_faces.json").read_text())
+    wpolys = [Polygon(f["ring"]).buffer(0) for f in water if len(f["ring"]) >= 4]
+    wmask = T.rasterize([(pg.__geo_interface__, 1) for pg in wpolys if not pg.is_empty], btr, (bz, bx)).astype(bool)
+    enc = np.zeros((bz, bx), np.uint16)
+    has = btop > 0
+    top_dm = np.clip(np.round((btop - hmin) * 10.0), 1, 1023).astype(np.uint16)
+    base_m = np.clip(np.round(bbase), 0, 62).astype(np.uint16)
+    enc[has] = (top_dm[has] << 6) | base_m[has]
+    enc[wmask & ~has] = 0xFFFF
+    (C.MODEL / "block_2m.u16").write_bytes(enc.astype("<u2").tobytes())
+    block_meta = {"nx": int(bx), "ny": int(bz), "dx": 2.0, "hmin": hmin, "x0": float(minx - C.ORIGIN[0]), "z_south": float(-(miny - C.ORIGIN[1]))}
+    print(f"block_2m.u16: {bx} x {bz}, {int(has.sum())} cellen met object, {int((wmask & ~has).sum())} watercellen")
+
     # scene.json
     to_wgs = Transformer.from_crs("EPSG:28992", "EPSG:4326", always_xy=True)
     lon, lat = to_wgs.transform(*C.ORIGIN)
@@ -168,6 +236,7 @@ def main():
         "patches": {"nx": C.NX, "ny": C.NY, "tex": "tex", "tex_hd": "tex_hd"},
         "heights": heights,
         "surface": surface_meta,
+        "block": block_meta,
         "stats": stats,
         "bronnen": [
             {"naam": "AHN (actuele versie, DTM/DSM 0,5 m via PDOK WCS)", "licentie": "CC0 / CC BY 4.0", "url": "https://www.ahn.nl"},

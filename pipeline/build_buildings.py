@@ -60,7 +60,7 @@ def main():
     photo_hits = 0
     P, N, Col, BID, ROOFF, I = [], [], [], [], [], []
     vcount = 0
-    info, footprints, pending = [], [], []
+    info, footprints, pending, blocks = [], [], [], []
     seen = set()
     lod_stats = Counter()
     for f in files:
@@ -121,6 +121,7 @@ def main():
                          "h": round(z1 - z0, 1), "lod": used_lod, "x": round(lx, 1), "z": round(lz, 1),
                          "dak": [round(float(c), 3) for c in roof_col], "opp": round(fp_area, 1)})
             pending.append((bid, faces, V, z0, roof_col))
+            blocks.append([[[round(float(x), 2), round(float(y), 2)] for x, y in V[ring][:, :2]], round(z1, 2)])
 
     # Gevelkleur per pand (schatting op bouwjaar/afmeting/dakkleur, met samenhang per bouwrij; zie facade_colours.py)
     walls = facade_colours.assign(
@@ -158,6 +159,7 @@ def main():
     size = w.write(C.MODEL / "buildings.glb")
     (C.MODEL / "buildings.json").write_text(json.dumps(info, separators=(",", ":")))
     (C.WORK / "footprints.json").write_text(json.dumps(footprints))
+    (C.WORK / "building_blocks.json").write_text(json.dumps(blocks))
     print(f"gebouwen: {len(info)} panden, LoD {dict(lod_stats)}, {len(Pm)} hoekpunten, {len(Im)} driehoeken, "
           f"buildings.glb {size/1e6:.1f} MB; {len(footprints)} footprints voor maskers")
 

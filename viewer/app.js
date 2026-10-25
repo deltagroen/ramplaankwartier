@@ -42,8 +42,8 @@ controls.target.copy(HOME.target);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.screenSpacePanning = false;
-controls.maxPolarAngle = Math.PI / 2 - 0.03;
-controls.minDistance = 4;
+controls.maxPolarAngle = Math.PI / 2 - 0.005;
+controls.minDistance = 1.5;
 controls.maxDistance = 4500;
 controls.zoomToCursor = true;
 controls.listenToKeyEvents(window);          // pijltjes verschuiven, met Shift/Ctrl draaien
@@ -360,6 +360,33 @@ function applyWeather(date, day, sunDir) {
   const desc = snowing ? `sneeuw ${snowfall.toFixed(1).replace('.', ',')} cm/u` : precip > 0.1 ? `regen ${precip.toFixed(1).replace('.', ',')} mm/u` : vis < 1500 ? 'mist' : thick > 0.85 ? 'bewolkt' : thinOnly > 0.5 ? 'sluierbewolking' : cloud > 0.45 ? 'halfbewolkt' : cloud > 0.15 ? 'licht bewolkt' : 'helder';
   const extra = [snow > 0.005 ? `sneeuwdek ${Math.round(snow * 100)} cm` : '', ice > 0.3 ? (ice > 0.8 ? 'ijs' : 'dun ijs') : ''].filter(Boolean).join(', ');
   return `${temps}, ${desc}${extra ? ', ' + extra : ''}${w.source === 'schatting' ? ' (schatting)' : ''}`;
+}
+
+// ---------- obstakelgrid (2 m): botsingen met gebouwen, boomkronen, stammen en water ----------
+let BM = null, BARR = null;
+const blockTmp = { v: 0, water: false, top: 0, base: 0 };
+function blockAt(x, z) {                     // top = absolute bovenkant (m), base = onderkant boven maaiveld (m)
+  blockTmp.v = 0; blockTmp.water = false;
+  if (!BM) return blockTmp;
+  const i = Math.floor((x - BM.x0) / BM.dx + 0.5), j = Math.floor((BM.z_south - z) / BM.dx + 0.5);
+  if (i < 0 || j < 0 || i >= BM.nx || j >= BM.ny) return blockTmp;
+  const v = BARR[j * BM.nx + i];
+  blockTmp.v = v;
+  if (v === 0xFFFF) { blockTmp.water = true; return blockTmp; }
+  blockTmp.top = BM.hmin + (v >> 6) * 0.1;
+  blockTmp.base = v & 63;
+  return blockTmp;
+}
+function walkBlocked(x, z) {                 // lopen: gevels en stammen (onderkant 0) blokkeren, water tenzij dik ijs
+  const b = blockAt(x, z);
+  if (b.v === 0) return false;
+  if (b.water) return (WX.cur.ice || 0) < 0.8;
+  return b.base === 0 && b.top > groundHeight(x, z) + 0.5;
+}
+function flyBlocked(x, y, z) {               // vrij rondkijken: alles tussen onderkant en bovenkant blokkeert
+  const b = blockAt(x, z);
+  if (b.v === 0 || b.water) return false;
+  return y < b.top + 0.5 && y > groundHeight(x, z) + b.base - 0.5;
 }
 
 // ---------- zon ----------
@@ -843,7 +870,7 @@ function stepFly(dt) {
   camera.position.lerpVectors(f.p0, f.p1, s);
   controls.target.lerpVectors(f.t0, f.t1, s);
   camera.lookAt(controls.target);
-  if (f.t >= f.dur) { state.flying = null; controls.enabled = true; controls.update(); }
+  if (f.t >= f.dur) { state.flying = null; controls.enabled = true; controls.update(); camPrev.copy(camera.position); }
 }
 $('#btnOverzicht').addEventListener('click', () => flyTo(HOME.target, HOME.pos));
 
@@ -1130,6 +1157,7 @@ function stopDay() {
   controls.enabled = true;
   controls.target.copy(dayTgt);
   controls.update();
+  camPrev.copy(camera.position);
   if (!DAY.panelWasCollapsed) { $('#panel').classList.remove('collapsed'); $('#collapse').textContent = '–'; }
   $('#dayplay').innerHTML = '&#x25B6; Dag afspelen';
 }
@@ -1235,23 +1263,39 @@ plc.addEventListener('unlock', () => {
   controls.target.copy(camera.position).addScaledVector(tmpV, 40);
   controls.target.y = Math.max(controls.target.y, groundHeight(controls.target.x, controls.target.z));
   controls.update();
+  camPrev.copy(camera.position);
 });
 $('#btnWalk').addEventListener('click', () => { if (state.walking) plc.unlock(); else enterWalk(); });
+const walkPrev = new THREE.Vector3();
 function stepWalk(dt) {
   const run = keys.ShiftLeft || keys.ShiftRight;
-  const speed = run ? 7 : 2.4;
+  const speed = run ? 12 : 6;                                     // stevig tempo; Shift = sprint
   const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
   const right = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  walkPrev.copy(camera.position);
   if (fwd) plc.moveForward(fwd * speed * dt);
   if (right) plc.moveRight(right * speed * dt);
   camera.position.x = THREE.MathUtils.clamp(camera.position.x, -695, 695);
   camera.position.z = THREE.MathUtils.clamp(camera.position.z, -595, 595);
+  if (walkBlocked(camera.position.x, camera.position.z)) {        // botsing: glijd langs het obstakel
+    const nx = camera.position.x, nz = camera.position.z;
+    if (!walkBlocked(nx, walkPrev.z)) camera.position.z = walkPrev.z;
+    else if (!walkBlocked(walkPrev.x, nz)) camera.position.x = walkPrev.x;
+    else { camera.position.x = walkPrev.x; camera.position.z = walkPrev.z; }
+  }
   const gy = groundHeight(camera.position.x, camera.position.z) + 1.7;
   camera.position.y += (gy - camera.position.y) * Math.min(1, dt * 10);
 }
-function clampCamera() {
-  const gy = groundHeight(camera.position.x, camera.position.z) + 2.0;
+const camPrev = new THREE.Vector3(), camDelta = new THREE.Vector3();
+function clampCamera() {                                            // vrij rondkijken: niet onder de grond, niet door objecten
+  const gy = groundHeight(camera.position.x, camera.position.z) + 1.7;
   if (camera.position.y < gy) camera.position.y = gy;
+  if (flyBlocked(camera.position.x, camera.position.y, camera.position.z)) {
+    camDelta.subVectors(camPrev, camera.position);                  // terug naar de vorige vrije positie
+    camera.position.copy(camPrev);
+    controls.target.add(camDelta);
+  }
+  camPrev.copy(camera.position);
 }
 
 // ---------- lus ----------
@@ -1315,6 +1359,9 @@ async function init() {
   HARR = new Uint16Array(await (await fetch(MODEL + 'heights_2m.u16' + VER)).arrayBuffer());
   SM = meta.surface || null;
   if (SM) SARR = new Uint16Array(await (await fetch(MODEL + 'surface_4m.u16' + VER)).arrayBuffer());
+  BM = meta.block || null;
+  if (BM) BARR = new Uint16Array(await (await fetch(MODEL + 'block_2m.u16' + VER)).arrayBuffer());
+  camPrev.copy(camera.position);
   STREETS = await fetchJSON(MODEL + 'streets.json').catch(() => []);
   const s = meta.stats || {};
   $('#stats').textContent = `${s.gebouwen ?? '?'} panden · ${(s.bomen_bgt || 0) + (s.bomen_gedetecteerd || 0)} bomen, ${s.bomen_soort || 0} met soort · model van ${(meta.gebouwd || '').slice(0, 10)}`;
@@ -1336,7 +1383,7 @@ async function init() {
   animate();
   startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked };
 
 init().catch((e) => {
   console.error(e);
