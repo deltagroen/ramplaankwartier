@@ -109,11 +109,15 @@ Pipeline:
 ## Weer
 
 Standaard toont de viewer het werkelijke weer van de gekozen dag, per uur, uit [Open-Meteo](https://open-meteo.com)
-(bewolking, neerslag, zicht; tot 90 dagen terug en 15 dagen vooruit via de verwachting, ouder via het archief).
-Zonder internet of buiten dat bereik geldt een klimatologische schatting die per dag vast is. Het weer bepaalt
-een drijvend wolkendek met gaten (procedurele ruis op een vlak op 1500 m), dat ook schaduw werpt via een eigen
-dieptemateriaal, de sterkte van het zonlicht en de schaduwen, de nevel (zicht) en regenstrepen. In het paneel kan
-het weer worden vastgezet: helder, halfbewolkt, bewolkt, regen of mist.
+(lage, middelbare en hoge bewolking, neerslag, zicht; tot 90 dagen terug en 15 dagen vooruit via de verwachting,
+ouder via het archief). Zonder internet of buiten dat bereik geldt een klimatologische schatting die per dag vast
+is. Het wolkendek is één procedureel ruisveld op 1500 m hoogte dat met de tijd drijft. Zichtbaar is het als koepel
+om de camera die per kijkrichting de snijding met dat vlak bemonstert, zodat het dek tot aan de horizon doorloopt
+en bij een gesloten dek de zon de hele dag onzichtbaar is; een hoge sluier zonder laag dek laat een melkwitte zon
+door. Hetzelfde ruisveld wordt als plat vlak in de schaduwkaart van de zon getekend (eigen dieptemateriaal), dus
+de wolkenschaduwen op de grond zijn de parallelle projectie van dezelfde wolken langs de zonrichting. Verder stuurt
+het weer de sterkte van het zonlicht, de nevel (zicht) en regenstrepen. In het paneel kan het weer worden
+vastgezet: helder, halfbewolkt, sluierbewolking, bewolkt, regen of mist.
 
 ## Gevelkleuren
 

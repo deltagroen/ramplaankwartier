@@ -92,9 +92,12 @@ function groundHeight(x, z) {
 const WX = { mode: 'echt', date: null, hours: null, source: '', cache: new Map(), pending: null, time: 0,
              cur: { cloud: 0.2, precip: 0, vis: 20000, fog: 0 } };
 const WX_PRESETS = {
-  helder: { cloud: 0.05, precip: 0, vis: 30000 }, halfbewolkt: { cloud: 0.5, precip: 0, vis: 18000 },
-  bewolkt: { cloud: 0.97, precip: 0, vis: 9000 }, regen: { cloud: 1.0, precip: 1.5, vis: 4000 },
-  mist: { cloud: 0.6, precip: 0, vis: 700 },
+  helder: { cloud: 0.05, thick: 0.05, thin: 0, precip: 0, vis: 30000 },
+  halfbewolkt: { cloud: 0.5, thick: 0.5, thin: 0, precip: 0, vis: 18000 },
+  sluierbewolking: { cloud: 0.9, thick: 0.1, thin: 0.9, precip: 0, vis: 20000 },
+  bewolkt: { cloud: 1.0, thick: 1.0, thin: 0, precip: 0, vis: 9000 },
+  regen: { cloud: 1.0, thick: 1.0, thin: 0, precip: 1.5, vis: 4000 },
+  mist: { cloud: 0.7, thick: 0.7, thin: 0, precip: 0, vis: 700 },
 };
 function dateKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function climatology(d) {   // seizoensgebonden, per dag vast (zelfde dag = zelfde weer)
@@ -110,7 +113,8 @@ function climatology(d) {   // seizoensgebonden, per dag vast (zelfde dag = zelf
     c = THREE.MathUtils.clamp(c + (rnd() - 0.5) * 0.25, 0, 1);
     const precip = wet && c > 0.7 && rnd() < 0.45 ? 0.3 + rnd() * 2 : 0;
     const vis = foggy && h >= 4 && h <= 10 ? 400 + rnd() * 1200 : precip ? 4000 + rnd() * 4000 : 12000 + rnd() * 18000;
-    hours.push({ cloud: c, precip, vis });
+    const thin = rnd() < 0.35 ? rnd() * 0.8 : 0;
+    hours.push({ cloud: Math.max(c, thin * 0.9), thick: c, thin, precip, vis });
   }
   return hours;
 }
@@ -121,10 +125,10 @@ async function fetchWeather(d) {
   const diff = (d - today) / 86400000;
   let url, vars;
   if (diff >= -90 && diff <= 15) {
-    vars = 'cloud_cover,precipitation,visibility,weather_code';
+    vars = 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,visibility,weather_code';
     url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&timezone=Europe%2FAmsterdam&start_date=${key}&end_date=${key}`;
   } else if (diff < -90) {
-    vars = 'cloud_cover,precipitation,weather_code';
+    vars = 'cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,precipitation,weather_code';
     url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&hourly=${vars}&timezone=Europe%2FAmsterdam&start_date=${key}&end_date=${key}`;
   } else {
     return null;                                                         // te ver in de toekomst
@@ -137,7 +141,9 @@ async function fetchWeather(d) {
     const code = H.weather_code ? H.weather_code[i] : 0;
     let vis = H.visibility ? H.visibility[i] : (code === 45 || code === 48 ? 600 : 15000);
     if (vis == null) vis = 15000;
-    return { cloud: (H.cloud_cover[i] ?? 50) / 100, precip: H.precipitation[i] ?? 0, vis };
+    const lo = (H.cloud_cover_low?.[i] ?? 0) / 100, mi = (H.cloud_cover_mid?.[i] ?? 0) / 100, hi = (H.cloud_cover_high?.[i] ?? 0) / 100;
+    const thick = H.cloud_cover_low ? 1 - (1 - lo) * (1 - mi) : (H.cloud_cover[i] ?? 50) / 100;
+    return { cloud: (H.cloud_cover[i] ?? 50) / 100, thick, thin: H.cloud_cover_high ? hi : 0, precip: H.precipitation[i] ?? 0, vis };
   });
   WX.cache.set(key, hours);
   return hours;
@@ -153,7 +159,7 @@ function weatherAt(date) {
   const t = date.getHours() + date.getMinutes() / 60;
   const i = Math.min(23, Math.floor(t)), f = t - i, a = WX.hours[i], b = WX.hours[Math.min(23, i + 1)];
   const mix = (k) => a[k] * (1 - f) + b[k] * f;
-  return { cloud: mix('cloud'), precip: mix('precip'), vis: mix('vis'), source: WX.source };
+  return { cloud: mix('cloud'), thick: mix('thick'), thin: mix('thin'), precip: mix('precip'), vis: mix('vis'), source: WX.source };
 }
 let seasonWeatherDirty = false;
 
@@ -180,35 +186,61 @@ function makeNoiseTexture() {
   tex.generateMipmaps = true; tex.needsUpdate = true;
   return tex;
 }
+const CLOUD_H = 1500;
+const cloudNoise = `
+  float cloudNoise(vec2 wp, float time) {
+    vec2 uv = wp / 3750.0 + vec2(time * 0.006, time * 0.003);
+    return texture2D(noiseTex, uv).r * 0.62 + texture2D(noiseTex, uv * 2.7 + vec2(0.31, 0.77) + time * 0.01).r * 0.28
+         + texture2D(noiseTex, uv * 6.1 + vec2(0.5, 0.2)).r * 0.10;
+  }`;
+// Zichtbaar wolkendek: een koepel om de camera; per kijkrichting wordt de snijding met het vlak y = CLOUD_H
+// berekend en daar de ruis bemonsterd. Zo loopt het dek tot exact de horizon door. De diepte staat op het verre
+// vlak, dus terrein en gebouwen staan er altijd voor.
 const cloudMat = new THREE.ShaderMaterial({
   uniforms: { noiseTex: { value: makeNoiseTexture() }, cover: { value: 0.2 }, dens: { value: 0.9 }, time: { value: 0 },
-              tint: { value: new THREE.Color(0.98, 0.98, 1.0) } },
-  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: `uniform sampler2D noiseTex; uniform float cover, dens, time; uniform vec3 tint; varying vec2 vUv;
+              tint: { value: new THREE.Color(0.98, 0.98, 1.0) }, haze: { value: new THREE.Color(0.8, 0.84, 0.9) },
+              cloudH: { value: CLOUD_H } },
+  vertexShader: `varying vec3 vWorld;
     void main(){
-      vec2 uv = vUv * 16.0 + vec2(time * 0.006, time * 0.003);
-      float n = texture2D(noiseTex, uv).r * 0.62 + texture2D(noiseTex, uv * 2.7 + vec2(0.31, 0.77) + time * 0.01).r * 0.28
-              + texture2D(noiseTex, uv * 6.1 + vec2(0.5, 0.2)).r * 0.10;
+      vec4 wp = modelMatrix * vec4(position, 1.0); vWorld = wp.xyz;
+      vec4 cp = projectionMatrix * viewMatrix * wp;
+      cp.z = cp.w * 0.99999;                        // altijd op het verre vlak: wolken zijn 'lucht', achter alles
+      gl_Position = cp;
+    }`,
+  fragmentShader: `uniform sampler2D noiseTex; uniform float cover, dens, time, cloudH; uniform vec3 tint, haze; varying vec3 vWorld;
+    ${cloudNoise}
+    void main(){
+      vec3 dir = normalize(vWorld - cameraPosition);
+      if (dir.y < -0.03 || cameraPosition.y >= cloudH) discard;   // ruim onder de horizon, of camera boven het dek
+      float dy = max(dir.y, 0.002);                               // vlak onder de horizon: nevelkleur doortrekken
+      float t = (cloudH - cameraPosition.y) / dy;
+      vec2 hit = cameraPosition.xz + dir.xz * t;
+      float n = cloudNoise(hit, time);
       float edge = 1.0 - cover;
       float a = smoothstep(edge - 0.10, edge + 0.22, n) * dens;
-      float d = length(vUv - 0.5) * 2.0;
-      a *= 1.0 - smoothstep(0.55, 0.97, d);
-      gl_FragColor = vec4(tint * (0.85 + 0.15 * n), a);
+      float h = smoothstep(0.0, 0.16, dir.y);         // bij de horizon versmelt het dek met de nevel
+      vec3 col = mix(haze, tint * (0.85 + 0.15 * n), h);
+      a = mix(min(a * 1.6, 1.0) * step(0.02, cover), a, h);
+      gl_FragColor = vec4(col, a);
     }`,
-  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  transparent: true, depthWrite: false, depthTest: true, side: THREE.BackSide,
 });
-const cloudPlane = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), cloudMat);
-cloudPlane.rotation.x = -Math.PI / 2; cloudPlane.position.y = 1500; cloudPlane.renderOrder = 5; cloudPlane.frustumCulled = false;
-cloudPlane.castShadow = true;
+const cloudDome = new THREE.Mesh(new THREE.SphereGeometry(5000, 48, 24), cloudMat);
+cloudDome.renderOrder = -1; cloudDome.frustumCulled = false;
+scene.add(cloudDome);
+// Schaduwwerper: plat vlak op CLOUD_H, alleen zichtbaar voor de schaduwcamera (laag 1)
+const cloudPlane = new THREE.Mesh(new THREE.PlaneGeometry(400000, 400000), new THREE.MeshBasicMaterial({ visible: true }));
+cloudPlane.rotation.x = -Math.PI / 2; cloudPlane.position.y = CLOUD_H; cloudPlane.frustumCulled = false;
+cloudPlane.layers.set(1); camera.layers.disable(1);
+cloudPlane.castShadow = true; cloudPlane.receiveShadow = false;
 cloudPlane.customDepthMaterial = new THREE.ShaderMaterial({     // wolkenschaduw: dezelfde ruis bepaalt waar licht doorkomt
   uniforms: cloudMat.uniforms,
-  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  vertexShader: 'varying vec3 vWorld; void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vWorld = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }',
   fragmentShader: `#include <packing>
-    uniform sampler2D noiseTex; uniform float cover, dens, time; varying vec2 vUv;
+    uniform sampler2D noiseTex; uniform float cover, dens, time; varying vec3 vWorld;
+    ${cloudNoise}
     void main(){
-      vec2 uv = vUv * 16.0 + vec2(time * 0.006, time * 0.003);
-      float n = texture2D(noiseTex, uv).r * 0.62 + texture2D(noiseTex, uv * 2.7 + vec2(0.31, 0.77) + time * 0.01).r * 0.28
-              + texture2D(noiseTex, uv * 6.1 + vec2(0.5, 0.2)).r * 0.10;
+      float n = cloudNoise(vWorld.xz, time);
       float edge = 1.0 - cover;
       float a = smoothstep(edge - 0.10, edge + 0.22, n) * dens;
       if (a < 0.5) discard;
@@ -251,8 +283,10 @@ function stepRain(dt) {
 function applyWeather(date, day, sunDir) {
   const w = weatherAt(date);
   WX.cur = w;
-  const cloud = THREE.MathUtils.clamp(w.cloud, 0, 1), precip = Math.max(0, w.precip), vis = Math.max(150, w.vis);
-  const dim = 1 - 0.78 * cloud * cloud - (precip > 0.1 ? 0.1 : 0);          // minder zon bij meer bewolking
+  const thick = THREE.MathUtils.clamp(w.thick ?? w.cloud, 0, 1), thin = THREE.MathUtils.clamp(w.thin ?? 0, 0, 1);
+  const cloud = Math.max(thick, thin), precip = Math.max(0, w.precip), vis = Math.max(150, w.vis);
+  const thinOnly = Math.max(0, thin - thick);                                  // hoge sluier zonder laag dek: melkwitte zon
+  const dim = 1 - 0.78 * thick * thick - 0.3 * thinOnly - (precip > 0.1 ? 0.1 : 0);
   sun.intensity *= Math.max(0.12, dim);
   sun.castShadow = sun.castShadow && dim > 0.3;
   hemi.intensity *= 1 + 0.25 * cloud;
@@ -269,11 +303,12 @@ function applyWeather(date, day, sunDir) {
   const base = 0.98 - 0.42 * cloud;
   cloudMat.uniforms.tint.value.setRGB(base * day * (1 + 0.1 * sunLow) + 0.03, base * day * (1 - 0.15 * sunLow) + 0.03, base * day * (1 - 0.3 * sunLow) + 0.05);
   cloudMat.uniforms.cover.value = cloud;
-  cloudMat.uniforms.dens.value = 0.75 + 0.25 * cloud;
-  cloudPlane.visible = cloud > 0.03;
+  cloudMat.uniforms.dens.value = thick > 0.02 ? 0.8 + 0.2 * thick : 0.45 + 0.2 * thin;   // sluier blijft doorschijnend
+  cloudMat.uniforms.haze.value.copy(scene.fog.color);
+  cloudPlane.visible = cloud > 0.03; cloudDome.visible = cloud > 0.03;
   rain.visible = precip > 0.1;
   rain.userData.opacity = Math.min(0.5, 0.2 + 0.15 * precip);
-  const desc = precip > 0.1 ? `regen ${precip.toFixed(1).replace('.', ',')} mm/u` : vis < 1500 ? 'mist' : cloud > 0.85 ? 'bewolkt' : cloud > 0.45 ? 'halfbewolkt' : cloud > 0.15 ? 'licht bewolkt' : 'helder';
+  const desc = precip > 0.1 ? `regen ${precip.toFixed(1).replace('.', ',')} mm/u` : vis < 1500 ? 'mist' : thick > 0.85 ? 'bewolkt' : thinOnly > 0.5 ? 'sluierbewolking' : cloud > 0.45 ? 'halfbewolkt' : cloud > 0.15 ? 'licht bewolkt' : 'helder';
   return `${desc}${w.source === 'schatting' ? ' (schatting)' : ''}`;
 }
 
@@ -1184,6 +1219,7 @@ function animate() {
   updateLabels();
   updateCompass();
   cloudMat.uniforms.time.value += dt;
+  cloudDome.position.copy(camera.position);
   stepRain(dt);
   if (seasonWeatherDirty) { seasonWeatherDirty = false; setSun(DAY.playing ? new Date(DAY.start.getTime() + DAY.p * (DAY.end - DAY.start)) : currentSunDate()); }
   renderer.render(scene, camera);
@@ -1232,7 +1268,7 @@ async function init() {
   animate();
   startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat, cloudDome, cloudPlane };
 
 init().catch((e) => {
   console.error(e);
