@@ -47,7 +47,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1116; col
 #needle::after { content: ""; position: absolute; top: 18px; left: 50%; width: 2px; height: 22px; margin-left: -1px;
   background: linear-gradient(#ff6b57, #ffffff55); }
 
-#info { position: fixed; right: 12px; bottom: 36px; width: 300px; background: var(--panel); border-radius: 10px;
+#info { position: fixed; right: 12px; bottom: 12px; width: 300px; background: var(--panel); border-radius: 10px;
   padding: 10px 14px; z-index: 10; }
 #info h4 { margin: 0 0 6px; font-size: 14px; }
 #info table { border-collapse: collapse; font-size: 13px; }
@@ -55,9 +55,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1116; col
 #info a { color: #8ec5ff; }
 #info .close { float: right; cursor: pointer; color: #9fb0c3; }
 
-#attrib { position: fixed; right: 0; bottom: 0; left: 0; padding: 4px 10px; font-size: 11px; color: #c3ccd6;
-  background: rgba(10, 12, 16, .55); z-index: 9; text-align: right; }
-#perf { color: #8fa3b8; }
+#bronnen { margin-top: 10px; }
+#bronnen summary { cursor: pointer; }
+#bronnen ul { margin: 6px 0 4px; padding-left: 18px; }
+#bronnen a { color: #8ec5ff; }
+#perf { color: #8fa3b8; margin-top: 4px; }
 
 @media (max-width: 640px) {
   #panel { width: calc(100% - 24px); max-height: 50%; }

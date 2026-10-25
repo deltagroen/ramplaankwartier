@@ -97,22 +97,50 @@ def crown_geometry(shape, r, h, hb):
     return pts, nrm
 
 
-def twig_planes(r, h, hb):
-    """3 verticale vlakken (0/60/120 graden) en 1 horizontaal vlak met uv 0..1, lokaal (kroonbasis op y=0)."""
+# Takkenatlas (viewer, makeTwigTexture): 4 zijaanzichten met oplopende stamdikte als fractie van de kroonbreedte,
+# daarna 1 bovenaanzicht; elk tegel 1/5 van de breedte. De stam in het silhouet loopt van de onderrand tot 0.3 van
+# de hoogte en moet in dikte aansluiten op de stamcilinder van het model.
+TWIG_TRUNK_FRAC = [0.025, 0.045, 0.08, 0.13]
+
+
+def twig_planes(r, h, hb, r_trunk, rot=0.0, mirror=False):
+    """3 verticale vlakken (60 graden uit elkaar, gedraaid met rot) en 1 horizontaal vlak, lokaal (kroonbasis y=0).
+    Het vlak is 2.1 r breed; de variant wordt gekozen zodat de getekende stam ~ 2 r_trunk breed is."""
     P, N, UV, I = [], [], [], []
     ch = h - hb
+    width = 2.1 * r
+    frac = 2 * r_trunk / width
+    var = int(np.argmin([abs(f - frac) for f in TWIG_TRUNK_FRAC]))
+    width = max(width, 2 * r_trunk / TWIG_TRUNK_FRAC[var])          # bij dikke stam: vlak iets breder
+    u0, u1 = var / 5, (var + 1) / 5
+    if mirror:
+        u0, u1 = u1, u0
     n = 0
     for k in range(3):
-        a = k * np.pi / 3
-        dx, dz = np.cos(a) * r * 1.05, np.sin(a) * r * 1.05
-        quad = np.array([[-dx, -0.15 * ch, -dz], [dx, -0.15 * ch, dz], [dx, ch, dz], [-dx, ch, -dz]])
+        a = rot + k * np.pi / 3
+        dx, dz = np.cos(a) * width / 2, np.sin(a) * width / 2
+        quad = np.array([[-dx, -0.3 * ch, -dz], [dx, -0.3 * ch, dz], [dx, ch, dz], [-dx, ch, -dz]])
         P.append(quad); N.append(np.tile([-np.sin(a), 0, np.cos(a)], (4, 1)))
-        UV.append([[0, 1], [0.5, 1], [0.5, 0], [0, 0]]); I.append(np.array([[0, 1, 2], [0, 2, 3]]) + n); n += 4
+        UV.append([[u0, 1], [u1, 1], [u1, 0], [u0, 0]]); I.append(np.array([[0, 1, 2], [0, 2, 3]]) + n); n += 4
     y = 0.55 * ch
-    quad = np.array([[-r, y, -r], [r, y, -r], [r, y, r], [-r, y, r]])
-    P.append(quad); N.append(np.tile([0, 1, 0], (4, 1))); UV.append([[0.5, 1], [1, 1], [1, 0], [0.5, 0]])
+    c, s_ = np.cos(rot), np.sin(rot)
+    corners = np.array([[-r, -r], [r, -r], [r, r], [-r, r]]) @ np.array([[c, s_], [-s_, c]])
+    quad = np.array([[cx, y, cz] for cx, cz in corners])
+    P.append(quad); N.append(np.tile([0, 1, 0], (4, 1))); UV.append([[0.8, 1], [1, 1], [1, 0], [0.8, 0]])
     I.append(np.array([[0, 1, 2], [0, 2, 3]]) + n)
     return np.vstack(P), np.vstack(N), np.array(UV).reshape(-1, 2), np.vstack(I)
+
+
+def trunk_radius(info, h):
+    """Stamstraal (m) uit de stamomtrek van het register, anders allometrisch uit de hoogte."""
+    om = (info or {}).get("stamomtrek")
+    try:
+        om = float(str(om).replace(",", "."))
+    except (TypeError, ValueError):
+        om = None
+    if om and om > 5:
+        return float(np.clip(om / 100.0 / (2 * np.pi), 0.05, 1.2))
+    return float(np.clip(0.011 * h + 0.02, 0.05, 0.6))
 
 
 def main():
@@ -176,7 +204,8 @@ def main():
                 p = bor[j]["properties"]
                 rec.update(spec=table.for_name(p.get("geslachtsnaam"), p.get("naam_lt")), bron="haarlem",
                            info={"lt": p.get("naam_lt"), "leeftijd": p.get("leeftijd"), "kroon": p.get("kroondiameter"),
-                                 "beschermd": p.get("beschermwaardig") == "Ja", "nr": p.get("boomnummer")})
+                                 "stamomtrek": p.get("stamomtrek"), "beschermd": p.get("beschermwaardig") == "Ja",
+                                 "nr": p.get("boomnummer")})
                 matched += 1
         municipal.append(rec)
     for j, f in enumerate(bor):               # registerbomen zonder BGT-punt in de buurt: toevoegen
@@ -188,7 +217,8 @@ def main():
         p = f["properties"]
         municipal.append({"x": x, "y": y, "bron": "haarlem", "spec": table.for_name(p.get("geslachtsnaam"), p.get("naam_lt")),
                           "info": {"lt": p.get("naam_lt"), "leeftijd": p.get("leeftijd"), "kroon": p.get("kroondiameter"),
-                                   "beschermd": p.get("beschermwaardig") == "Ja", "nr": p.get("boomnummer")}})
+                                   "stamomtrek": p.get("stamomtrek"), "beschermd": p.get("beschermwaardig") == "Ja",
+                                   "nr": p.get("boomnummer")}})
     print(f"gemeentelijke bomen: {len(bgt_xy)} BGT-punten, {len(bor)} registerbomen, {matched} gekoppeld, "
           f"{len(municipal)} totaal")
 
@@ -255,7 +285,7 @@ def main():
         seas = float(rng.random())
         shape = prof["shape"]
         hb = {"conical": 0.12, "columnar": 0.15, "weeping": 0.22, "small": 0.3}.get(shape, 0.28 if h > 5 else 0.22) * h
-        rt = float(np.clip(0.03 * h, 0.10, 0.45))
+        rt = trunk_radius(info, h)
         # stam
         v = CYL_V.copy(); v[:, 0] *= rt; v[:, 2] *= rt
         v[:, 1] = v[:, 1] * (hb + 0.8) + (zg - 0.5); v[:, 0] += lx; v[:, 2] += lz
@@ -274,14 +304,15 @@ def main():
         I.append(SPH_F + n); n += len(pts)
         # takken (alleen bladverliezend)
         if not prof["evergreen"]:
-            tp, tnn, tuv, ti = twig_planes(r * (0.55 if shape == "columnar" else 1.0), h, hb)
+            tp, tnn, tuv, ti = twig_planes(r * (0.55 if shape == "columnar" else 1.0), h, hb, rt,
+                                           rot=float(rng.random() * np.pi), mirror=bool(rng.random() < 0.5))
             tp = tp + [lx, zg + hb, lz]
             TP.append(tp); TN.append(tnn); TUV.append(tuv)
-            TC.append(np.tile((0.24, 0.19, 0.15, 0.0), (len(tp), 1)))
+            TC.append(np.tile((0.80, 0.74, 0.68, 0.0), (len(tp), 1)))
             TSEAS.append(np.full(len(tp), seas, np.float32)); TSPEC.append(np.full(len(tp), spec, np.float32))
             TTID.append(np.full(len(tp), tid, np.float32)); TI.append(ti + tn); tn += len(tp)
-        out.append({"x": round(lx, 1), "z": round(lz, 1), "h": round(h, 1), "r": round(r, 1), "bron": bron, "spec": spec,
-                    **{k: v for k, v in info.items() if v not in (None, "", False)}})
+        out.append({"x": round(lx, 1), "z": round(lz, 1), "h": round(h, 1), "r": round(r, 1), "stam": round(2 * rt, 2),
+                    "bron": bron, "spec": spec, **{k: v for k, v in info.items() if v not in (None, "", False)}})
 
     w = GLBWriter()
     m = w.add_material("bomen", roughness=0.95)

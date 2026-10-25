@@ -54,7 +54,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff4e0, 3.0);
 sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
-Object.assign(sun.shadow.camera, { left: -1000, right: 1000, top: 1000, bottom: -1000, near: 50, far: 7000 });
+Object.assign(sun.shadow.camera, { left: -1000, right: 1000, top: 1000, bottom: -1000, near: 10, far: 20000 });
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.6;
 scene.add(sun);
@@ -87,6 +87,190 @@ function groundHeight(x, z) {
   return (h(j, i) * (1 - tx) + h(j, i + 1) * tx) * (1 - tz) + (h(j + 1, i) * (1 - tx) + h(j + 1, i + 1) * tx) * tz;
 }
 
+// ---------- weer: bewolking, zicht en neerslag per uur van de gekozen dag ----------
+// Bron: Open-Meteo (open data, CC BY 4.0) voor de werkelijke dag; zonder internet een klimatologische schatting.
+const WX = { mode: 'echt', date: null, hours: null, source: '', cache: new Map(), pending: null, time: 0,
+             cur: { cloud: 0.2, precip: 0, vis: 20000, fog: 0 } };
+const WX_PRESETS = {
+  helder: { cloud: 0.05, precip: 0, vis: 30000 }, halfbewolkt: { cloud: 0.5, precip: 0, vis: 18000 },
+  bewolkt: { cloud: 0.97, precip: 0, vis: 9000 }, regen: { cloud: 1.0, precip: 1.5, vis: 4000 },
+  mist: { cloud: 0.6, precip: 0, vis: 700 },
+};
+function dateKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function climatology(d) {   // seizoensgebonden, per dag vast (zelfde dag = zelfde weer)
+  const doy = (d - new Date(d.getFullYear(), 0, 1)) / 86400000;
+  let seed = d.getFullYear() * 367 + Math.floor(doy) * 31 + 11;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  const meanCloud = 0.62 + 0.12 * Math.cos((doy - 15) / 365 * Math.PI * 2);     // winter bewolkter
+  const wet = rnd() < 0.3 + 0.15 * Math.cos((doy - 300) / 365 * Math.PI * 2);
+  const foggy = rnd() < (doy > 260 || doy < 60 ? 0.12 : 0.04);
+  let c = THREE.MathUtils.clamp(meanCloud + (rnd() - 0.5) * 0.8, 0, 1);
+  const hours = [];
+  for (let h = 0; h < 24; h++) {
+    c = THREE.MathUtils.clamp(c + (rnd() - 0.5) * 0.25, 0, 1);
+    const precip = wet && c > 0.7 && rnd() < 0.45 ? 0.3 + rnd() * 2 : 0;
+    const vis = foggy && h >= 4 && h <= 10 ? 400 + rnd() * 1200 : precip ? 4000 + rnd() * 4000 : 12000 + rnd() * 18000;
+    hours.push({ cloud: c, precip, vis });
+  }
+  return hours;
+}
+async function fetchWeather(d) {
+  const key = dateKey(d);
+  if (WX.cache.has(key)) return WX.cache.get(key);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = (d - today) / 86400000;
+  let url, vars;
+  if (diff >= -90 && diff <= 15) {
+    vars = 'cloud_cover,precipitation,visibility,weather_code';
+    url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=${vars}&timezone=Europe%2FAmsterdam&start_date=${key}&end_date=${key}`;
+  } else if (diff < -90) {
+    vars = 'cloud_cover,precipitation,weather_code';
+    url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&hourly=${vars}&timezone=Europe%2FAmsterdam&start_date=${key}&end_date=${key}`;
+  } else {
+    return null;                                                         // te ver in de toekomst
+  }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('weer ' + r.status);
+  const j = await r.json();
+  const H = j.hourly;
+  const hours = H.time.map((t, i) => {
+    const code = H.weather_code ? H.weather_code[i] : 0;
+    let vis = H.visibility ? H.visibility[i] : (code === 45 || code === 48 ? 600 : 15000);
+    if (vis == null) vis = 15000;
+    return { cloud: (H.cloud_cover[i] ?? 50) / 100, precip: H.precipitation[i] ?? 0, vis };
+  });
+  WX.cache.set(key, hours);
+  return hours;
+}
+function weatherAt(date) {
+  if (WX.mode !== 'echt') return { ...WX_PRESETS[WX.mode], source: 'ingesteld' };
+  const key = dateKey(date);
+  if (WX.date !== key) {                                                  // nieuwe dag: ophalen, tot dan klimatologie
+    WX.date = key; WX.hours = climatology(date); WX.source = 'schatting';
+    fetchWeather(date).then((h) => { if (h && WX.date === key) { WX.hours = h; WX.source = 'Open-Meteo'; seasonWeatherDirty = true; } })
+      .catch(() => {});
+  }
+  const t = date.getHours() + date.getMinutes() / 60;
+  const i = Math.min(23, Math.floor(t)), f = t - i, a = WX.hours[i], b = WX.hours[Math.min(23, i + 1)];
+  const mix = (k) => a[k] * (1 - f) + b[k] * f;
+  return { cloud: mix('cloud'), precip: mix('precip'), vis: mix('vis'), source: WX.source };
+}
+let seasonWeatherDirty = false;
+
+// Wolkendek: een groot vlak op 1500 m met procedurele ruis; dekking en dichtheid uit het weer.
+function makeNoiseTexture() {
+  const n = 256, g = 16, grid = [];
+  let seed = 3;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  for (let i = 0; i < g * g; i++) grid.push(rnd());
+  const data = new Uint8Array(n * n * 4);
+  const val = (x, y) => {                                                 // naadloze waarde-ruis
+    const gx = (x / n) * g, gy = (y / n) * g, x0 = Math.floor(gx), y0 = Math.floor(gy);
+    const tx = THREE.MathUtils.smoothstep(gx - x0, 0, 1), ty = THREE.MathUtils.smoothstep(gy - y0, 0, 1);
+    const v = (i, j) => grid[((j + g) % g) * g + ((i + g) % g)];
+    return (v(x0, y0) * (1 - tx) + v(x0 + 1, y0) * tx) * (1 - ty) + (v(x0, y0 + 1) * (1 - tx) + v(x0 + 1, y0 + 1) * tx) * ty;
+  };
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const v = 0.55 * val(x, y) + 0.3 * val((x * 2) % n, (y * 2) % n) + 0.15 * val((x * 4) % n, (y * 4) % n);
+    data[(y * n + x) * 4] = data[(y * n + x) * 4 + 1] = data[(y * n + x) * 4 + 2] = Math.round(v * 255);
+    data[(y * n + x) * 4 + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(data, n, n);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true; tex.needsUpdate = true;
+  return tex;
+}
+const cloudMat = new THREE.ShaderMaterial({
+  uniforms: { noiseTex: { value: makeNoiseTexture() }, cover: { value: 0.2 }, dens: { value: 0.9 }, time: { value: 0 },
+              tint: { value: new THREE.Color(0.98, 0.98, 1.0) } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D noiseTex; uniform float cover, dens, time; uniform vec3 tint; varying vec2 vUv;
+    void main(){
+      vec2 uv = vUv * 16.0 + vec2(time * 0.006, time * 0.003);
+      float n = texture2D(noiseTex, uv).r * 0.62 + texture2D(noiseTex, uv * 2.7 + vec2(0.31, 0.77) + time * 0.01).r * 0.28
+              + texture2D(noiseTex, uv * 6.1 + vec2(0.5, 0.2)).r * 0.10;
+      float edge = 1.0 - cover;
+      float a = smoothstep(edge - 0.10, edge + 0.22, n) * dens;
+      float d = length(vUv - 0.5) * 2.0;
+      a *= 1.0 - smoothstep(0.55, 0.97, d);
+      gl_FragColor = vec4(tint * (0.85 + 0.15 * n), a);
+    }`,
+  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+});
+const cloudPlane = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), cloudMat);
+cloudPlane.rotation.x = -Math.PI / 2; cloudPlane.position.y = 1500; cloudPlane.renderOrder = 5; cloudPlane.frustumCulled = false;
+cloudPlane.castShadow = true;
+cloudPlane.customDepthMaterial = new THREE.ShaderMaterial({     // wolkenschaduw: dezelfde ruis bepaalt waar licht doorkomt
+  uniforms: cloudMat.uniforms,
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `#include <packing>
+    uniform sampler2D noiseTex; uniform float cover, dens, time; varying vec2 vUv;
+    void main(){
+      vec2 uv = vUv * 16.0 + vec2(time * 0.006, time * 0.003);
+      float n = texture2D(noiseTex, uv).r * 0.62 + texture2D(noiseTex, uv * 2.7 + vec2(0.31, 0.77) + time * 0.01).r * 0.28
+              + texture2D(noiseTex, uv * 6.1 + vec2(0.5, 0.2)).r * 0.10;
+      float edge = 1.0 - cover;
+      float a = smoothstep(edge - 0.10, edge + 0.22, n) * dens;
+      if (a < 0.5) discard;
+      gl_FragColor = packDepthToRGBA(gl_FragCoord.z);
+    }`,
+  side: THREE.DoubleSide,
+});
+scene.add(cloudPlane);
+
+// Regen: korte vallende strepen rond de camera
+const RAIN_N = 1600, rainPos = new Float32Array(RAIN_N * 2 * 3);
+for (let i = 0; i < RAIN_N; i++) {
+  const x = (Math.random() - 0.5) * 120, y = Math.random() * 90, z = (Math.random() - 0.5) * 120;
+  rainPos.set([x, y, z, x, y - 1.4, z], i * 6);
+}
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xcfd8e4, transparent: true, opacity: 0.35 }));
+rain.visible = false; rain.frustumCulled = false; rain.material.fog = false;
+scene.add(rain);
+function stepRain(dt) {
+  if (!rain.visible) return;
+  const p = rainGeo.attributes.position.array;
+  for (let i = 0; i < RAIN_N; i++) {
+    let y = p[i * 6 + 1] - 16 * dt;
+    if (y < 0) { y += 90; p[i * 6] = (Math.random() - 0.5) * 120; p[i * 6 + 2] = (Math.random() - 0.5) * 120; }
+    p[i * 6 + 1] = y; p[i * 6 + 4] = y - 1.4;
+  }
+  rainGeo.attributes.position.needsUpdate = true;
+  rain.position.set(camera.position.x, Math.max(camera.position.y - 45, groundHeight(camera.position.x, camera.position.z)), camera.position.z);
+}
+
+// Weer toepassen op licht, lucht, mist en wolken; `day` = daglichtfactor uit setSun
+function applyWeather(date, day, sunDir) {
+  const w = weatherAt(date);
+  WX.cur = w;
+  const cloud = THREE.MathUtils.clamp(w.cloud, 0, 1), precip = Math.max(0, w.precip), vis = Math.max(150, w.vis);
+  const dim = 1 - 0.78 * cloud * cloud - (precip > 0.1 ? 0.1 : 0);          // minder zon bij meer bewolking
+  sun.intensity *= Math.max(0.12, dim);
+  sun.castShadow = sun.castShadow && dim > 0.3;
+  hemi.intensity *= 1 + 0.25 * cloud;
+  hemi.color.setRGB(0.81 + 0.1 * cloud, 0.88 - 0.02 * cloud, 1.0 - 0.1 * cloud);
+  renderer.toneMappingExposure *= 1 - 0.22 * cloud - (precip > 0.1 ? 0.08 : 0);
+  const haze = 1 - THREE.MathUtils.clamp(vis / 25000, 0, 1);
+  su.turbidity.value = 2.5 + 12 * haze * haze + 2 * cloud;
+  su.rayleigh.value = 2.0 - 0.8 * cloud;
+  scene.fog.near = THREE.MathUtils.clamp(0.25 * vis, 80, 2500);
+  scene.fog.far = THREE.MathUtils.clamp(1.3 * vis, 600, 14000);
+  const fogGrey = 0.45 + 0.5 * day;
+  scene.fog.color.setRGB(fogGrey * (0.86 + 0.1 * (1 - cloud)), fogGrey * 0.9, fogGrey * (0.96 + 0.04 * (1 - cloud)));
+  const sunLow = THREE.MathUtils.clamp(1 - sunDir.y * 6, 0, 1) * day;      // lage zon kleurt de wolken
+  const base = 0.98 - 0.42 * cloud;
+  cloudMat.uniforms.tint.value.setRGB(base * day * (1 + 0.1 * sunLow) + 0.03, base * day * (1 - 0.15 * sunLow) + 0.03, base * day * (1 - 0.3 * sunLow) + 0.05);
+  cloudMat.uniforms.cover.value = cloud;
+  cloudMat.uniforms.dens.value = 0.75 + 0.25 * cloud;
+  cloudPlane.visible = cloud > 0.03;
+  rain.visible = precip > 0.1;
+  rain.material.opacity = Math.min(0.5, 0.2 + 0.15 * precip);
+  const desc = precip > 0.1 ? `regen ${precip.toFixed(1).replace('.', ',')} mm/u` : vis < 1500 ? 'mist' : cloud > 0.85 ? 'bewolkt' : cloud > 0.45 ? 'halfbewolkt' : cloud > 0.15 ? 'licht bewolkt' : 'helder';
+  return `${desc}${w.source === 'schatting' ? ' (schatting)' : ''}`;
+}
+
 // ---------- zon ----------
 let lat = 52.3827, lon = 4.6058;
 function currentSunDate() {
@@ -100,7 +284,7 @@ function setSun(date) {
   const p = SunCalc.getPosition(date, lat, lon);   // azimuth: 0 = zuid, +west; altitude in rad
   const ca = Math.cos(p.altitude);
   const dir = new THREE.Vector3(-Math.sin(p.azimuth) * ca, Math.sin(p.altitude), Math.cos(p.azimuth) * ca); // x oost, y omhoog, z zuid
-  sun.position.copy(dir).multiplyScalar(3000);
+  sun.position.copy(dir).multiplyScalar(9000);   // ver genoeg om boven het wolkendek (1500 m) te staan
   sun.target.position.set(0, 0, 0);
   su.sunPosition.value.copy(dir);
   const day = THREE.MathUtils.smoothstep(p.altitude, -0.06, 0.12);
@@ -108,8 +292,9 @@ function setSun(date) {
   hemi.intensity = 0.45 + 0.6 * day;
   renderer.toneMappingExposure = 0.36 + 0.24 * day;
   sun.castShadow = state.layers.schaduw && day > 0.05;
+  const wdesc = applyWeather(date, day, dir);
   const hh = String(date.getHours()).padStart(2, '0'), mm = String(date.getMinutes()).padStart(2, '0');
-  $('#sunlabel').textContent = `${hh}:${mm} · zon ${(p.altitude * 180 / Math.PI).toFixed(0)}°`;
+  $('#sunlabel').textContent = `${hh}:${mm} · zon ${(p.altitude * 180 / Math.PI).toFixed(0)}° · ${wdesc}`;
 }
 function sunNow(forceDaylight = false) {
   const n = new Date();
@@ -121,6 +306,7 @@ function sunNow(forceDaylight = false) {
 $('#sundate').addEventListener('input', () => setSun(currentSunDate()));
 $('#suntime').addEventListener('input', () => setSun(currentSunDate()));
 $('#sunnow').addEventListener('click', () => sunNow(false));
+$('#weather').addEventListener('change', () => { WX.mode = $('#weather').value; setSun(DAY.playing ? new Date(DAY.start.getTime() + DAY.p * (DAY.end - DAY.start)) : currentSunDate()); });
 
 // ---------- laden ----------
 const loader = new GLTFLoader();
@@ -202,8 +388,8 @@ function setupTrees(root) {
       twigMesh = o;
       o.castShadow = true; o.receiveShadow = false;
       const m = o.material;
-      m.map = makeTwigTexture(); m.alphaHash = true; m.transparent = false; m.side = THREE.DoubleSide;
-      m.vertexColors = true; m.roughness = 1; m.needsUpdate = true;
+      m.map = makeTwigTexture(); m.alphaTest = 0.5; m.alphaToCoverage = true; m.alphaHash = false; m.transparent = false;
+      m.side = THREE.DoubleSide; m.vertexColors = true; m.roughness = 1; m.needsUpdate = true;
       wSeason = o.geometry.getAttribute('_season'); wSpec = o.geometry.getAttribute('_spec');
     } else {
       tMesh = o;
@@ -217,32 +403,73 @@ function setupTrees(root) {
   applySeason(currentSunDate());
 }
 
-// Procedurele takkentextuur: links een zijaanzicht (vertakkende boom), rechts een bovenaanzicht (radiale takken)
+// Procedurele takkentextuur: atlas van 5 tegels. Tegel 0-3: zijaanzicht met oplopende stamdikte (fractie van de
+// tegelbreedte 0.025, 0.045, 0.08, 0.13, zie TWIG_TRUNK_FRAC in build_trees.py); tegel 4: bovenaanzicht. De stam
+// loopt van de onderrand tot 0.3 van de hoogte, waar de stamcilinder van het model eindigt. Vertakking volgens het
+// pijpmodel: de doorsneden van de zijtakken samen zijn die van de tak eronder, zodat de dikte netjes verjongt.
+// Het alfakanaal codeert de dikte: dunne twijgen hebben lagere alfa en verdwijnen bij het uitdunnen het eerst.
 function makeTwigTexture() {
-  const W = 1024, H = 512, c = document.createElement('canvas');
+  const TILE = 1024, W = TILE * 5, H = TILE, c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
-  let seed = 7;
+  let seed = 11;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
-  ctx.lineCap = 'round'; ctx.strokeStyle = 'rgb(58,44,34)';
-  const branch = (x, y, len, ang, w, depth) => {
-    const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
-    ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
-    if (depth <= 0 || w < 0.5) return;
-    const k = 2 + (rnd() < 0.45 ? 1 : 0);
+  ctx.lineCap = 'round';
+  const drawTree = (ox, trunkW) => {
+    const alphaFor = (w) => 0.56 + 0.44 * Math.sqrt(Math.min(1, w / trunkW));
+    const seg = (x, y, len, ang, w, depth, up) => {
+      const bend = (rnd() - 0.5) * 0.3;
+      const xm = x + Math.cos(ang + bend) * len * 0.5, ym = y + Math.sin(ang + bend) * len * 0.5;
+      const x2 = xm + Math.cos(ang) * len * 0.5, y2 = ym + Math.sin(ang) * len * 0.5;
+      ctx.strokeStyle = `rgba(74,58,46,${alphaFor(w).toFixed(3)})`;
+      ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(xm, ym, x2, y2); ctx.stroke();
+      if (depth <= 0 || w < 0.8) return;
+      const k = 2 + (rnd() < 0.5 ? 1 : 0);
+      let shares = []; let tot = 0;
+      for (let i = 0; i < k; i++) { const v = 0.6 + rnd(); shares.push(v); tot += v; }
+      shares = shares.map((v) => v / tot * 0.92);                           // 8% verlies: taps toelopen
+      for (let i = 0; i < k; i++) {
+        const wc = w * Math.sqrt(shares[i]);
+        const da = (rnd() - 0.5) * 1.0 + (i - (k - 1) / 2) * 0.62 - (up ? 0.1 : 0);
+        seg(x2, y2, len * (0.55 + 0.35 * Math.sqrt(shares[i])) * (0.9 + rnd() * 0.2), ang + da, wc, depth - 1, up);
+      }
+    };
+    // stam: van de onderrand (y=H) recht omhoog tot 0.3 H, daar splitst hij
+    ctx.strokeStyle = `rgba(74,58,46,1)`; ctx.lineWidth = trunkW; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(ox + TILE / 2, H); ctx.lineTo(ox + TILE / 2, H * 0.7); ctx.stroke();
+    ctx.lineCap = 'round';
+    const k = 3 + (rnd() < 0.5 ? 1 : 0);
+    let shares = []; let tot = 0;
+    for (let i = 0; i < k; i++) { const v = 0.6 + rnd(); shares.push(v); tot += v; }
+    shares = shares.map((v) => v / tot * 0.95);
     for (let i = 0; i < k; i++) {
-      const da = (rnd() - 0.5) * 1.3 + (i - (k - 1) / 2) * 0.55;
-      branch(x2, y2, len * (0.62 + rnd() * 0.16), ang + da, w * 0.62, depth - 1);
+      const wc = trunkW * Math.sqrt(shares[i]);
+      const ang = -Math.PI / 2 + (i - (k - 1) / 2) * 0.5 + (rnd() - 0.5) * 0.3;
+      seg(ox + TILE / 2, H * 0.7, H * 0.26 * (0.8 + 0.4 * Math.sqrt(shares[i])), ang, wc, 9, true);
     }
   };
-  branch(256, 500, 150, -Math.PI / 2, 13, 7);                      // zijaanzicht
-  for (let i = 0; i < 7; i++) {                                     // bovenaanzicht: takken vanuit het midden
-    const a = i / 7 * Math.PI * 2 + rnd() * 0.5;
-    branch(768, 256, 90 + rnd() * 40, a, 7, 5);
+  [0.025, 0.045, 0.08, 0.13].forEach((f, i) => { seed = 11 + i * 97; drawTree(i * TILE, f * TILE); });
+  seed = 5;                                                                   // bovenaanzicht: takken vanuit het midden
+  const cx = 4 * TILE + TILE / 2, cy = TILE / 2;
+  const k = 7 + (rnd() < 0.5 ? 1 : 0);
+  for (let i = 0; i < k; i++) {
+    const a = i / k * Math.PI * 2 + rnd() * 0.5;
+    const w = 20;
+    const seg2 = (x, y, len, ang, ww, depth) => {
+      const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
+      ctx.strokeStyle = `rgba(74,58,46,${(0.56 + 0.44 * Math.sqrt(Math.min(1, ww / 20))).toFixed(3)})`;
+      ctx.lineWidth = ww; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
+      if (depth <= 0 || ww < 0.8) return;
+      const kk = 2 + (rnd() < 0.4 ? 1 : 0);
+      for (let j = 0; j < kk; j++) seg2(x2, y2, len * (0.6 + rnd() * 0.2), ang + (rnd() - 0.5) * 1.1 + (j - (kk - 1) / 2) * 0.5, ww * 0.62, depth - 1);
+    };
+    seg2(cx, cy, 150 + rnd() * 70, a, w, 7);
   }
   const tex = new THREE.CanvasTexture(c);
+  tex.flipY = false;                                                // uv's volgen de glTF-conventie (0,0 = linksboven)
   tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = maxAniso;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter;
   return tex;
 }
 
@@ -323,6 +550,7 @@ function treeInfoHTML(t) {
     ${t.leeftijd ? `<tr><td>Leeftijd</td><td>${t.leeftijd} jaar</td></tr>` : ''}
     <tr><td>Hoogte</td><td>${t.h} m (uit AHN)</td></tr>
     ${t.kroon ? `<tr><td>Kroon</td><td>${t.kroon} m (register)</td></tr>` : ''}
+    ${t.stamomtrek ? `<tr><td>Stamomtrek</td><td>${String(t.stamomtrek).replace('.', ',')} cm (register)</td></tr>` : t.stam ? `<tr><td>Stamdikte</td><td>${t.stam.toFixed(2).replace('.', ',')} m (geschat)</td></tr>` : ''}
     ${t.beschermd ? `<tr><td></td><td>Beschermwaardige boom</td></tr>` : ''}
     <tr><td>Bron</td><td>${bron}</td></tr>
   </table>`;
@@ -949,6 +1177,9 @@ function animate() {
   else { stepRotate(dt); controls.update(); clampCamera(); }
   updateLabels();
   updateCompass();
+  cloudMat.uniforms.time.value += dt;
+  stepRain(dt);
+  if (seasonWeatherDirty) { seasonWeatherDirty = false; setSun(DAY.playing ? new Date(DAY.start.getTime() + DAY.p * (DAY.end - DAY.start)) : currentSunDate()); }
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
   frames++; fpsT += dt;
@@ -995,7 +1226,7 @@ async function init() {
   animate();
   startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat };
 
 init().catch((e) => {
   console.error(e);

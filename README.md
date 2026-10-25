@@ -46,7 +46,9 @@ vroeg, eik en es laat), bloesem bij sierappel, meidoorn, sierkers, sierpeer, mag
 van die soort, zomergroen per soort (bruine beuk donkerrood, abelen grijsgroen), verkleuring vanaf eind
 september naar de kleur van de soort (beuk koper, berk en linde geel, Parrotia rood, amberboom purper, els en
 wilg dof), bladval, en in de winter kale bomen: de kroon verdwijnt en een takkensilhouet verschijnt (drie
-verticale en een horizontaal vlak met een procedureel getekende takkentextuur, zie `makeTwigTexture()`).
+verticale en een horizontaal vlak met een procedureel getekende takkentextuur, zie `makeTwigTexture()`). De
+stamdikte komt uit de stamomtrek in het register (anders geschat uit de hoogte) en het silhouet wordt gekozen uit
+vier varianten zodat de getekende stam op de stamcilinder aansluit; de takken vertakken volgens het pijpmodel.
 Groenblijvende soorten (den, leylandcipres, hulst, taxus) houden hun kroon. Tabel in `pipeline/species.py`,
 toewijzing en kroonvorm (rond, breed, zuil, treur, kegel) in `build_trees.py`, kleuring in `applySeason()`.
 
@@ -104,6 +106,15 @@ Pipeline:
 8. `optimize.sh` – terrein vereenvoudigen en meshopt-compressie (gltf-transform). `buildings.glb` blijft
    ongecomprimeerd omdat het `_BID`-attribuut exact moet blijven.
 
+## Weer
+
+Standaard toont de viewer het werkelijke weer van de gekozen dag, per uur, uit [Open-Meteo](https://open-meteo.com)
+(bewolking, neerslag, zicht; tot 90 dagen terug en 15 dagen vooruit via de verwachting, ouder via het archief).
+Zonder internet of buiten dat bereik geldt een klimatologische schatting die per dag vast is. Het weer bepaalt
+een drijvend wolkendek met gaten (procedurele ruis op een vlak op 1500 m), dat ook schaduw werpt via een eigen
+dieptemateriaal, de sterkte van het zonlicht en de schaduwen, de nevel (zicht) en regenstrepen. In het paneel kan
+het weer worden vastgezet: helder, halfbewolkt, bewolkt, regen of mist.
+
 ## Gevelkleuren
 
 Voor gevels bestaat geen open bron: de stereo- en obliekopnamen van Beeldmateriaal zijn niet open, de open
@@ -135,5 +146,5 @@ of een eigen kleur. Daarna `build_buildings.py` opnieuw draaien.
 ## Bronnen en licenties
 
 AHN (CC0/CC BY 4.0, ahn.nl), Kadaster 3D Basisvoorziening (CC BY 4.0), Luchtfoto Beeldmateriaal Nederland
-(CC BY 4.0), BGT (CC0), CBS Wijken en Buurten (CC BY 4.0), boomregister gemeente Haarlem (open data, CC BY-SA 4.0). Vermeld bij publicatie de bronnen zoals in de
-voettekst van de viewer. Software: three.js (MIT), SunCalc (BSD-2), gltf-transform (MIT), meshoptimizer (MIT).
+(CC BY 4.0), BGT (CC0), CBS Wijken en Buurten (CC BY 4.0), boomregister gemeente Haarlem (open data, CC BY-SA 4.0). Vermeld bij publicatie de bronnen zoals onder
+"Bronnen en licenties" onderaan het paneel van de viewer. Software: three.js (MIT), SunCalc (BSD-2), gltf-transform (MIT), meshoptimizer (MIT).
