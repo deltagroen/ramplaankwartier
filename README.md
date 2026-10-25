@@ -41,10 +41,14 @@ met vertraging in scherpe bochten en in de lage pas. Tijdens het vliegen zijn he
 straatnamen uit. Elke muis- of toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het
 opnieuw.
 
-De bomen volgen het seizoen van de gekozen datum: uitlopen in april (fris lichtgroen), zomergroen, verkleuring
-vanaf eind september per boom naar geel, oranjebruin of olijf, bladval in oktober en november, en in de winter
-kale, ijle grijsbruine kronen. Circa 15% van de bomen is groenblijvend. De verdeling staat in `build_trees.py`
-(attributen `_SEASON` en `_CROWN`), de kleuring in `applySeason()` in `viewer/app.js`.
+De bomen volgen het seizoen van de gekozen datum, per soort: uitlopen in april (fris lichtgroen, wilg en els
+vroeg, eik en es laat), bloesem bij sierappel, meidoorn, sierkers, sierpeer, magnolia en kastanje op het moment
+van die soort, zomergroen per soort (bruine beuk donkerrood, abelen grijsgroen), verkleuring vanaf eind
+september naar de kleur van de soort (beuk koper, berk en linde geel, Parrotia rood, amberboom purper, els en
+wilg dof), bladval, en in de winter kale bomen: de kroon verdwijnt en een takkensilhouet verschijnt (drie
+verticale en een horizontaal vlak met een procedureel getekende takkentextuur, zie `makeTwigTexture()`).
+Groenblijvende soorten (den, leylandcipres, hulst, taxus) houden hun kroon. Tabel in `pipeline/species.py`,
+toewijzing en kroonvorm (rond, breed, zuil, treur, kegel) in `build_trees.py`, kleuring in `applySeason()`.
 
 Bediening: slepen = verschuiven, draaien = rechter muisknop, Ctrl/Shift+slepen, twee vingers op een trackpad,
 toetsen `Q`/`E` of de draaiknoppen in het paneel (`R`/`F` kantelen, knop of kompas = noorden boven),
@@ -59,7 +63,7 @@ bouwjaar, BGT-maquette in plaats van luchtfoto.
 | Terrein | AHN DTM 0,5 m via PDOK WCS (actuele AHN; hier AHN5, gevlogen 2023) | 1 m-grid, vereenvoudigd tot ca. 0,8 M driehoeken, gaten gevuld, water ingebrand |
 | Luchtfoto | Luchtfoto Beeldmateriaal NL 2026, 8 cm (PDOK WMS, laag `2026_orthoHR`) | 16 texturen van 2048², ingebed in terrain.glb |
 | Gebouwen | Kadaster 3D Basisvoorziening 2025, LoD 2.2 (CityJSON) | 2730 panden, met bouwjaar en BAG-id; dakkleur = mediaankleur van de luchtfoto binnen het dak; gevelkleur = schatting op bouwjaar, afmeting en dakkleur (zie hieronder); 1,5 m onder maaiveld doorgetrokken |
-| Bomen | BGT-boompunten (gemeentelijk) + automatische detectie in DSM-DTM | hoogte uit AHN; particuliere tuinbomen zijn automatisch gedetecteerd en dus indicatief; kleur en bladbezetting volgen het seizoen |
+| Bomen | Boomregister gemeente Haarlem (soort, leeftijd, kroonklasse) gekoppeld aan BGT-boompunten, plus automatische detectie in DSM-DTM | 1011 bomen met soort, 352 BGT-punten zonder soort, 6465 gedetecteerde tuinbomen (indicatief); hoogte uit AHN; klik op een boom voor soort en leeftijd |
 | Water, wegen, groen | Kadaster 3D Basisvoorziening 2025 (BGT-vlakken met hoogte) | water altijd zichtbaar; wegen/groen als "maquette"-laag |
 | Buurtgrens, straatnamen | CBS Wijken en Buurten 2025, BGT openbareruimtelabels | |
 
@@ -90,12 +94,12 @@ overgeslagen als het al bestaat), tussenresultaten in `data/work/`, het model in
 
 Pipeline:
 
-1. `fetch_data.py` – DTM/DSM (WCS), luchtfototegels (WMS), Kadaster CityJSON-tegels, BGT-bomen en -labels, CBS-buurtgrens.
+1. `fetch_data.py` – DTM/DSM (WCS), luchtfototegels (WMS), Kadaster CityJSON-tegels, BGT-bomen en -labels, boomregister Haarlem (GeoServer data.haarlem.nl, laag bor_bomen), CBS-buurtgrens.
 2. `build_water_maquette.py` – water.glb en maquette.glb; schrijft ook de watervlakken voor stap 4 en 6.
 3. `build_buildings.py` – buildings.glb en buildings.json (attributen per pand).
 4. `build_terrain.py` – terrain.glb (16 patches met UV's) en heights_2m.u16 (hoogtegrid voor de viewer).
 5. `build_textures.py` – WebP-texturen per patch.
-6. `build_trees.py` – trees.glb en trees.json.
+6. `build_trees.py` – trees.glb (kronen, stammen en takkensilhouetten), trees.json en species.json.
 7. `build_misc.py` – buurtgrens.json, labels.json, scene.json.
 8. `optimize.sh` – terrein vereenvoudigen en meshopt-compressie (gltf-transform). `buildings.glb` blijft
    ongecomprimeerd omdat het `_BID`-attribuut exact moet blijven.
@@ -131,5 +135,5 @@ of een eigen kleur. Daarna `build_buildings.py` opnieuw draaien.
 ## Bronnen en licenties
 
 AHN (CC0/CC BY 4.0, ahn.nl), Kadaster 3D Basisvoorziening (CC BY 4.0), Luchtfoto Beeldmateriaal Nederland
-(CC BY 4.0), BGT (CC0), CBS Wijken en Buurten (CC BY 4.0). Vermeld bij publicatie de bronnen zoals in de
+(CC BY 4.0), BGT (CC0), CBS Wijken en Buurten (CC BY 4.0), boomregister gemeente Haarlem (open data, CC BY-SA 4.0). Vermeld bij publicatie de bronnen zoals in de
 voettekst van de viewer. Software: three.js (MIT), SunCalc (BSD-2), gltf-transform (MIT), meshoptimizer (MIT).

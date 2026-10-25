@@ -43,6 +43,9 @@ RD_CRS = "http://www.opengis.net/def/crs/EPSG/0/28992"
 # CBS Wijken en Buurten (buurtgrens).
 CBS_WFS = "https://service.pdok.nl/cbs/wijkenbuurten/2025/wfs/v1_0"
 
+# Gemeente Haarlem: boombeheerregister (soort, leeftijd, kroonklasse) via open GeoServer.
+HAARLEM_WFS = "https://data.haarlem.nl/geoserver/wfs"
+
 # Bomen
 TREE_MIN_H = 3.0          # minimale hoogte (m) voor automatisch gedetecteerde bomen
 TREE_WINDOW_M = 4.5       # zoekvenster voor lokale maxima in het kroonhoogtemodel

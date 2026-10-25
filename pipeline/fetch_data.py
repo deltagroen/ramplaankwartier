@@ -171,10 +171,24 @@ def fetch_bgt_labels():
         print("[bgt] labelvelden:", list(feats[0]["properties"].keys()))
 
 
+def fetch_haarlem_bor():
+    """Gemeentelijk boomregister (soort, leeftijd, kroonklasse) via de GeoServer van Haarlem."""
+    dest = C.RAW / "vector" / "haarlem_bor_bomen.geojson"
+    if dest.exists():
+        print(f"[haarlem] {dest.name} bestaat al"); return
+    minx, miny, maxx, maxy = C.AOI
+    url = (f"{C.HAARLEM_WFS}?service=WFS&version=2.0.0&request=GetFeature&typeNames=gemeentehaarlem:bor_bomen"
+           f"&outputFormat=application/json&srsName=EPSG:28992&bbox={minx:.0f},{miny:.0f},{maxx:.0f},{maxy:.0f},EPSG:28992&count=20000")
+    data, _ = http_get(url)
+    d = json.loads(data)
+    dest.write_text(json.dumps(d, ensure_ascii=False))
+    print(f"[haarlem] {len(d.get('features', []))} bomen uit het beheerregister -> {dest.name}")
+
+
 if __name__ == "__main__":
     C.ensure_dirs()
-    steps = sys.argv[1:] or ["terrain", "kadaster", "bgt", "labels", "buurt", "ortho"]
+    steps = sys.argv[1:] or ["terrain", "kadaster", "bgt", "labels", "haarlem", "buurt", "ortho"]
     for s in steps:
         {"terrain": fetch_terrain, "ortho": fetch_ortho, "kadaster": fetch_kadaster,
-         "bgt": fetch_bgt_trees, "labels": fetch_bgt_labels, "buurt": fetch_buurt}[s]()
+         "bgt": fetch_bgt_trees, "labels": fetch_bgt_labels, "haarlem": fetch_haarlem_bor, "buurt": fetch_buurt}[s]()
     print("klaar")

@@ -192,55 +192,105 @@ function setupBuildings(root, info) {
   layers.gebouwen.add(root);
 }
 
-let tMesh = null, tOrig = null, tSeason = null, tCrown = null, seasonKey = null;
+let tMesh = null, twigMesh = null, tOrig = null, tSeason = null, tSpec = null, tCrown = null, tTid = null;
+let wSeason = null, wSpec = null, seasonKey = null, SPECIES = [], TREES = null;
 function setupTrees(root) {
   root.traverse((o) => {
     if (!o.isMesh) return;
-    o.castShadow = o.receiveShadow = true;
     o.material.roughness = 0.95; o.material.metalness = 0;
-    tMesh = o;
-    const g = o.geometry;
-    tOrig = g.getAttribute('color').array.slice();
-    tSeason = g.getAttribute('_season');
-    tCrown = g.getAttribute('_crown');
+    if (o.name === 'takken') {
+      twigMesh = o;
+      o.castShadow = true; o.receiveShadow = false;
+      const m = o.material;
+      m.map = makeTwigTexture(); m.alphaHash = true; m.transparent = false; m.side = THREE.DoubleSide;
+      m.vertexColors = true; m.roughness = 1; m.needsUpdate = true;
+      wSeason = o.geometry.getAttribute('_season'); wSpec = o.geometry.getAttribute('_spec');
+    } else {
+      tMesh = o;
+      o.castShadow = o.receiveShadow = true;
+      const g = o.geometry;
+      tOrig = g.getAttribute('color').array.slice();
+      tSeason = g.getAttribute('_season'); tSpec = g.getAttribute('_spec'); tCrown = g.getAttribute('_crown'); tTid = g.getAttribute('_tid');
+    }
   });
   layers.bomen.add(root);
   applySeason(currentSunDate());
 }
 
-// ---------- seizoenen: bladkleur en bladbezetting van de bomen volgen de datum ----------
-function seasonState(date) {
-  const doy = (date - new Date(date.getFullYear(), 0, 1)) / 86400000;
-  const ss = (x, a, b) => THREE.MathUtils.smoothstep(x, a, b);
-  const leafOut = ss(doy, 88, 132);                       // uitlopen eind maart - begin mei
-  const leaf = Math.min(leafOut, 1 - ss(doy, 292, 330));  // bladval half oktober - eind november
-  return { leaf, autumn: ss(doy, 266, 304), spring: leafOut * (1 - ss(doy, 128, 170)) };
+// Procedurele takkentextuur: links een zijaanzicht (vertakkende boom), rechts een bovenaanzicht (radiale takken)
+function makeTwigTexture() {
+  const W = 1024, H = 512, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  ctx.lineCap = 'round'; ctx.strokeStyle = 'rgb(58,44,34)';
+  const branch = (x, y, len, ang, w, depth) => {
+    const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
+    ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
+    if (depth <= 0 || w < 0.5) return;
+    const k = 2 + (rnd() < 0.45 ? 1 : 0);
+    for (let i = 0; i < k; i++) {
+      const da = (rnd() - 0.5) * 1.3 + (i - (k - 1) / 2) * 0.55;
+      branch(x2, y2, len * (0.62 + rnd() * 0.16), ang + da, w * 0.62, depth - 1);
+    }
+  };
+  branch(256, 500, 150, -Math.PI / 2, 13, 7);                      // zijaanzicht
+  for (let i = 0; i < 7; i++) {                                     // bovenaanzicht: takken vanuit het midden
+    const a = i / 7 * Math.PI * 2 + rnd() * 0.5;
+    branch(768, 256, 90 + rnd() * 40, a, 7, 5);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = maxAniso;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+// ---------- seizoenen: bladkleur, bloesem en bladbezetting per soort volgen de datum ----------
+const ss = (x, a, b) => THREE.MathUtils.smoothstep(x, a, b);
+function seasonFactors(doy, prof) {
+  // standaard: uitlopen 29 mrt - 12 mei, verkleuren 23 sep - 31 okt, bladval 19 okt - 26 nov; per soort verschoven
+  const lo = prof.lo || 0, as = prof.as || 0, fs = prof.fs || 0;
+  const leafOut = ss(doy, 88 + lo, 132 + lo);
+  const leaf = prof.evergreen ? 1 : Math.min(leafOut, 1 - ss(doy, 292 + fs, 330 + fs));
+  const autumn = prof.evergreen ? 0 : ss(doy, 266 + as, 304 + as) * (1 - ss(doy, 320 + fs, 345 + fs));
+  const spring = prof.evergreen ? 0 : leafOut * (1 - ss(doy, 128 + lo, 170 + lo));
+  let blossom = 0;
+  if (prof.blossom) { const d = (doy - prof.bdoy) / (prof.blen / 2); blossom = Math.exp(-2 * d * d); }
+  return { leaf, autumn, spring, blossom };
 }
 function applySeason(date) {
-  if (!tMesh || !tSeason || !tCrown) return;
+  if (!tMesh || !tSeason || !tSpec || !SPECIES.length) return;
   const key = date.getFullYear() * 1000 + Math.floor((date - new Date(date.getFullYear(), 0, 1)) / 86400000);
   if (key === seasonKey) return;
   seasonKey = key;
-  const { leaf, autumn, spring } = seasonState(date);
+  const doy0 = (date - new Date(date.getFullYear(), 0, 1)) / 86400000;
   const col = tMesh.geometry.getAttribute('color');
   const arr = col.array, k = col.itemSize;
   let anyAlpha = false;
   for (let i = 0; i < col.count; i++) {
-    if (tCrown.getX(i) < 0.5) continue;                   // stammen veranderen niet
+    if (tCrown.getX(i) < 0.5) continue;
     const r = tSeason.getX(i);
-    if (r > 0.85) continue;                                // groenblijvend
+    const prof = SPECIES[tSpec.getX(i) | 0] || SPECIES[0];
+    const doy = doy0 - (r - 0.5) * 14;                            // per boom tot een week vroeger of later
+    const f = seasonFactors(doy, prof);
     let R = tOrig[i * k] / 255, G = tOrig[i * k + 1] / 255, B = tOrig[i * k + 2] / 255;
-    const sp = spring * 0.5;                               // lente: lichter en frisser groen
-    R = R * (1 - sp) + 0.38 * sp; G = G * (1 - sp) + 0.60 * sp; B = B * (1 - sp) + 0.10 * sp;
-    const t = (r * 7.31) % 1;                              // per boom andere herfstkleur en -timing
-    const ac = t < 0.33 ? [0.62, 0.42, 0.05] : t < 0.66 ? [0.55, 0.17, 0.04] : [0.28, 0.30, 0.07];
-    const a = THREE.MathUtils.clamp(autumn * (0.55 + 0.9 * ((r * 3.7) % 1)), 0, 1);
-    R = R * (1 - a) + ac[0] * a; G = G * (1 - a) + ac[1] * a; B = B * (1 - a) + ac[2] * a;
-    const bare = 1 - leaf;                                 // winter: kale, grijsbruine kroon
-    R = R * (1 - bare) + 0.16 * bare; G = G * (1 - bare) + 0.13 * bare; B = B * (1 - bare) + 0.10 * bare;
-    arr[i * k] = Math.round(R * 255); arr[i * k + 1] = Math.round(G * 255); arr[i * k + 2] = Math.round(B * 255);
+    const sp = f.spring * 0.45;
+    R = R * (1 - sp) + 0.42 * sp; G = G * (1 - sp) + 0.62 * sp; B = B * (1 - sp) + 0.12 * sp;
+    if (f.autumn > 0) {
+      const v = 0.86 + 0.28 * ((r * 5.3) % 1);                   // per boom lichter of donkerder herfstblad
+      const a = f.autumn;
+      R = R * (1 - a) + prof.autumn[0] * v * a; G = G * (1 - a) + prof.autumn[1] * v * a; B = B * (1 - a) + prof.autumn[2] * v * a;
+    }
+    if (f.blossom > 0.02) {
+      const b = f.blossom * 0.9;
+      R = R * (1 - b) + prof.blossom[0] * b; G = G * (1 - b) + prof.blossom[1] * b; B = B * (1 - b) + prof.blossom[2] * b;
+    }
+    arr[i * k] = Math.round(THREE.MathUtils.clamp(R, 0, 1) * 255);
+    arr[i * k + 1] = Math.round(THREE.MathUtils.clamp(G, 0, 1) * 255);
+    arr[i * k + 2] = Math.round(THREE.MathUtils.clamp(B, 0, 1) * 255);
     if (k === 4) {
-      const alpha = 0.28 + 0.72 * Math.min(1, leaf * (0.8 + 0.4 * ((r * 5.1) % 1)));
+      const alpha = prof.evergreen ? 1 : THREE.MathUtils.clamp(Math.max(f.leaf, f.blossom * 0.95), 0, 1);
       arr[i * k + 3] = Math.round(alpha * 255);
       if (alpha < 0.995) anyAlpha = true;
     }
@@ -248,6 +298,34 @@ function applySeason(date) {
   col.needsUpdate = true;
   const m = tMesh.material;
   if (m.alphaHash !== anyAlpha) { m.alphaHash = anyAlpha; m.transparent = false; m.needsUpdate = true; }
+  if (twigMesh && wSeason && wSpec) {                          // kale takken zichtbaar naarmate het blad valt
+    const wc = twigMesh.geometry.getAttribute('color');
+    const wa = wc.array, wk = wc.itemSize;
+    let anyTwig = false;
+    for (let i = 0; i < wc.count; i++) {
+      const prof = SPECIES[wSpec.getX(i) | 0] || SPECIES[0];
+      const doy = doy0 - (wSeason.getX(i) - 0.5) * 14;
+      const f = seasonFactors(doy, prof);
+      const a = prof.evergreen ? 0 : THREE.MathUtils.clamp(1 - Math.max(f.leaf, f.blossom), 0, 1);
+      wa[i * wk + 3] = Math.round(a * 255);
+      if (a > 0.005) anyTwig = true;
+    }
+    wc.needsUpdate = true;
+    twigMesh.visible = anyTwig;
+  }
+}
+function treeInfoHTML(t) {
+  const prof = SPECIES[t.spec] || {};
+  const naam = prof.nl ? prof.nl.charAt(0).toUpperCase() + prof.nl.slice(1) : 'Boom';
+  const bron = t.bron === 'haarlem' ? `Gemeente Haarlem, boomnummer ${t.nr ?? '?'}` : t.bron === 'bgt' ? 'BGT-boompunt, soort onbekend' : 'gedetecteerd in het hoogtemodel, soort onbekend';
+  return `<span class="close" id="infoclose">✕</span><h4>${naam}</h4><table>
+    ${t.lt ? `<tr><td>Soort</td><td><i>${t.lt}</i></td></tr>` : ''}
+    ${t.leeftijd ? `<tr><td>Leeftijd</td><td>${t.leeftijd} jaar</td></tr>` : ''}
+    <tr><td>Hoogte</td><td>${t.h} m (uit AHN)</td></tr>
+    ${t.kroon ? `<tr><td>Kroon</td><td>${t.kroon} m (register)</td></tr>` : ''}
+    ${t.beschermd ? `<tr><td></td><td>Beschermwaardige boom</td></tr>` : ''}
+    <tr><td>Bron</td><td>${bron}</td></tr>
+  </table>`;
 }
 
 function setupWater(root) {
@@ -380,6 +458,13 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const ndc = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
   const hits = layers.gebouwen.visible ? raycaster.intersectObject(bMesh, false) : [];
+  const thits = layers.bomen.visible && tMesh && TREES ? raycaster.intersectObject(tMesh, false) : [];
+  if (thits.length && (!hits.length || thits[0].distance < hits[0].distance)) {
+    select(null);
+    const t = TREES.trees[tTid.getX(thits[0].face.a) | 0];
+    if (t) { $('#info').innerHTML = treeInfoHTML(t); $('#info').classList.remove('hidden'); $('#infoclose').onclick = () => $('#info').classList.add('hidden'); }
+    return;
+  }
   select(hits.length ? bidAttr.getX(hits[0].face.a) : null);
 });
 
@@ -891,12 +976,14 @@ async function init() {
   if (SM) SARR = new Uint16Array(await (await fetch(MODEL + 'surface_4m.u16' + VER)).arrayBuffer());
   STREETS = await fetchJSON(MODEL + 'streets.json').catch(() => []);
   const s = meta.stats || {};
-  $('#stats').textContent = `${s.gebouwen ?? '?'} panden · ${(s.bomen_bgt || 0) + (s.bomen_gedetecteerd || 0)} bomen · model van ${(meta.gebouwd || '').slice(0, 10)}`;
+  $('#stats').textContent = `${s.gebouwen ?? '?'} panden · ${(s.bomen_bgt || 0) + (s.bomen_gedetecteerd || 0)} bomen, ${s.bomen_soort || 0} met soort · model van ${(meta.gebouwd || '').slice(0, 10)}`;
   sunNow(true);
-  const [terrain, buildings, trees, water, maquette, binfo, grens, labels] = await Promise.all([
+  const [terrain, buildings, trees, water, maquette, binfo, grens, labels, speciesList, treeList] = await Promise.all([
     loadGLB('terrain.glb'), loadGLB('buildings.glb'), loadGLB('trees.glb'), loadGLB('water.glb'), loadGLB('maquette.glb'),
     fetchJSON(MODEL + 'buildings.json'), fetchJSON(MODEL + 'buurtgrens.json'), fetchJSON(MODEL + 'labels.json'),
+    fetchJSON(MODEL + 'species.json').catch(() => []), fetchJSON(MODEL + 'trees.json').catch(() => null),
   ]);
+  SPECIES = speciesList; TREES = treeList;
   setupTerrain(terrain.scene);
   setupBuildings(buildings.scene, binfo);
   setupTrees(trees.scene);
@@ -908,7 +995,7 @@ async function init() {
   animate();
   startDay();
 }
-window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonState };
+window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors };
 
 init().catch((e) => {
   console.error(e);

@@ -156,7 +156,8 @@ def main():
     tj = C.MODEL / "trees.json"
     if tj.exists():
         t = json.loads(tj.read_text())
-        stats["bomen_bgt"], stats["bomen_gedetecteerd"] = t["bgt"], t["detected"]
+        stats["bomen_bgt"], stats["bomen_gedetecteerd"] = t.get("municipal", t.get("bgt", 0)), t["detected"]
+        stats["bomen_soort"] = sum(1 for x in t.get("trees", []) if x.get("bron") == "haarlem")
     scene = {
         "naam": "Ramplaankwartier 3D",
         "gebouwd": dt.datetime.now().isoformat(timespec="minutes"),
