@@ -17,6 +17,13 @@ AOI = (101100.0, 488000.0, 102500.0, 489200.0)        # minx, miny, maxx, maxy (
 ORIGIN = (101800.0, 488600.0)                          # lokaal nulpunt (RD)
 BUURTCODE = "BU03920503"
 
+# Omgeving ("ring"): grof, niet bevliegbaar, 6 x 6 km rond de wijk.
+RING = (98800.0, 485600.0, 104800.0, 491600.0)
+RING_GRID = 10.0                                       # hoekpuntafstand ringterrein (m)
+RING_WMS_SUB = 2                                       # 2 x 2 WMS-verzoeken van 3 km op 2000 px (1,5 m/px)
+RING_WMS_PX = 2000
+RING_TEX = 4096
+
 # Terrein: patches met eigen textuur.
 NX, NY = 4, 4                                          # 4 x 4 patches van 350 x 300 m
 GRID_M = 1.0                                           # hoekpuntafstand terreinmesh (m)

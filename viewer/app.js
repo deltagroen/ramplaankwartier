@@ -10,7 +10,7 @@ const MODEL = './model/';
 const $ = (s) => document.querySelector(s);
 
 const state = {
-  layers: { gebouwen: true, bomen: true, water: true, buurtgrens: false, labels: true, maquette: false,
+  layers: { gebouwen: true, bomen: true, water: true, buurtgrens: false, labels: true, maquette: false, omgeving: true,
             bouwjaar: false, schaduw: true },
   walking: false, selected: null, flying: null,
 };
@@ -44,7 +44,7 @@ controls.dampingFactor = 0.08;
 controls.screenSpacePanning = false;
 controls.maxPolarAngle = Math.PI / 2 - 0.005;
 controls.minDistance = 1.5;
-controls.maxDistance = 4500;
+controls.maxDistance = 1800;
 controls.zoomToCursor = true;
 controls.listenToKeyEvents(window);          // pijltjes verschuiven, met Shift/Ctrl draaien
 
@@ -449,7 +449,7 @@ async function fetchJSON(u) {
 
 const layers = {
   gebouwen: new THREE.Group(), bomen: new THREE.Group(), water: new THREE.Group(),
-  buurtgrens: new THREE.Group(), maquette: new THREE.Group(), labels: new THREE.Group(),
+  buurtgrens: new THREE.Group(), maquette: new THREE.Group(), labels: new THREE.Group(), omgeving: new THREE.Group(),
 };
 for (const g of Object.values(layers)) scene.add(g);
 layers.maquette.visible = false;
@@ -680,24 +680,41 @@ function treeInfoHTML(t) {
   </table>`;
 }
 
-let waterMat = null, waterBase = null;
+const waterMats = [];                  // [materiaal, basiskleur] van wijk- en omgevingswater
+function setupWaterMaterial(m) {
+  m.transparent = true; m.opacity = 0.82; m.depthWrite = false; m.roughness = 0.12; m.metalness = 0.05;
+  waterMats.push([m, m.color.clone()]);
+  enableSnow(m, 1);
+}
 function setupWater(root) {
-  root.traverse((o) => {
-    if (!o.isMesh) return;
-    const m = o.material;
-    m.transparent = true; m.opacity = 0.82; m.depthWrite = false; m.roughness = 0.12; m.metalness = 0.05;
-    o.receiveShadow = true;
-    waterMat = m; waterBase = m.color.clone();
-    enableSnow(m, 1);
-  });
+  root.traverse((o) => { if (o.isMesh) { setupWaterMaterial(o.material); o.receiveShadow = true; } });
   layers.water.add(root);
 }
 function setIce(ice, snow) {          // bevroren water: mat, licht grijsblauw en dicht; sneeuw erop via de shader
-  if (!waterMat) return;
-  waterMat.color.copy(waterBase).lerp(new THREE.Color(0.78, 0.83, 0.87), ice);
-  waterMat.opacity = 0.82 + 0.18 * ice;
-  waterMat.roughness = 0.12 + 0.55 * ice;
-  waterMat.depthWrite = ice > 0.5;
+  for (const [m, base] of waterMats) {
+    m.color.copy(base).lerp(new THREE.Color(0.78, 0.83, 0.87), ice);
+    m.opacity = 0.82 + 0.18 * ice;
+    m.roughness = 0.12 + 0.55 * ice;
+    m.depthWrite = ice > 0.5;
+  }
+}
+
+// ---------- omgeving: grof terrein, blokgebouwen en water buiten het werkgebied ----------
+function setupContext(terrainGltf, objectsGltf) {
+  if (terrainGltf) terrainGltf.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    o.material.roughness = 1; o.material.metalness = 0;
+    if (o.material.map) o.material.map.anisotropy = maxAniso;
+    enableSnow(o.material, 1);
+    layers.omgeving.add(o);
+  });
+  if (objectsGltf) objectsGltf.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.name === 'omgeving_water') setupWaterMaterial(o.material);
+    else { o.material.vertexColors = true; o.material.flatShading = true; o.material.roughness = 0.9; o.material.metalness = 0; enableSnow(o.material, 1); }
+    layers.omgeving.add(o);
+  });
+  layers.omgeving.visible = state.layers.omgeving;
 }
 
 function setupMaquette(root) {
@@ -839,6 +856,7 @@ function setLayer(name, on) {
     case 'bomen': layers.bomen.visible = on; break;
     case 'water': layers.water.visible = on; break;
     case 'buurtgrens': layers.buurtgrens.visible = on; break;
+    case 'omgeving': layers.omgeving.visible = on; break;
     case 'maquette':
       layers.maquette.visible = on;
       for (const m of terrainMeshes) m.material = on ? plainMat : m.userData.photoMat;
@@ -1287,7 +1305,14 @@ function stepWalk(dt) {
   camera.position.y += (gy - camera.position.y) * Math.min(1, dt * 10);
 }
 const camPrev = new THREE.Vector3(), camDelta = new THREE.Vector3();
+const FENCE = { x: 700, z: 600, margin: 150, top: 1200 };
 function clampCamera() {                                            // vrij rondkijken: niet onder de grond, niet door objecten
+  // hek: kijkpunt in het werkgebied, camera hooguit `margin` daarbuiten en niet hoger dan `top`
+  controls.target.x = THREE.MathUtils.clamp(controls.target.x, -FENCE.x, FENCE.x);
+  controls.target.z = THREE.MathUtils.clamp(controls.target.z, -FENCE.z, FENCE.z);
+  camera.position.x = THREE.MathUtils.clamp(camera.position.x, -FENCE.x - FENCE.margin, FENCE.x + FENCE.margin);
+  camera.position.z = THREE.MathUtils.clamp(camera.position.z, -FENCE.z - FENCE.margin, FENCE.z + FENCE.margin);
+  camera.position.y = Math.min(camera.position.y, FENCE.top);
   const gy = groundHeight(camera.position.x, camera.position.z) + 1.7;
   if (camera.position.y < gy) camera.position.y = gy;
   if (flyBlocked(camera.position.x, camera.position.y, camera.position.z)) {
@@ -1382,6 +1407,8 @@ async function init() {
   $('#overlay').classList.add('hidden');
   animate();
   startDay();
+  Promise.all([loadGLB('context_terrain.glb').catch(() => null), loadGLB('context_objects.glb').catch(() => null)])
+    .then(([ct, co]) => setupContext(ct, co));
 }
 window.R3D = { THREE, scene, camera, renderer, controls, sun, hemi, sky, layers, state, setSun, flyTo, groundHeight, orbitBy, northUp, DAY, startDay, stopDay, setDayProgress, surfaceMax, applySeason, seasonFactors, WX, applyWeather, cloudMat, cloudDome, cloudPlane, SNOW, blockAt, walkBlocked, flyBlocked };
 

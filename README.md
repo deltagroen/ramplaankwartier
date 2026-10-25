@@ -27,7 +27,7 @@ vanaf `file://`).
 - Handmatig: `cd viewer && python3 -m http.server 8765` en open <http://localhost:8765/>.
 
 De map `viewer/` is zelfstandig: kopieer die map naar een andere computer of zet hem op een webserver
-(bijv. GitHub Pages) en hij werkt zonder verdere installatie. Omvang circa 30 MB.
+(bijv. GitHub Pages) en hij werkt zonder verdere installatie. Omvang circa 42 MB, waarvan 11 MB omgeving die na het hoofdmodel wordt geladen.
 
 Bij het openen wordt de dag afgespeeld: de camera begint recht boven de wijk vlak voor zonsopkomst, kantelt naar
 de opkomende zon, vliegt een lus om en door de wijk op wisselende hoogtes terwijl de zon zijn baan aflegt, en
@@ -58,6 +58,9 @@ gevels, daken of kronen en niet onder het maaiveld; bij het lopen houden gevels,
 maar onder een kroon kun je door, en op water kun je alleen als het ijs dik genoeg is. Lopen gaat 6 m/s, met
 Shift 12 m/s.
 
+De omgeving is alleen decor: het kijkpunt blijft binnen het werkgebied, de camera hooguit 150 m daarbuiten en
+niet hoger dan 1200 m.
+
 Bediening: slepen = verschuiven, draaien = rechter muisknop, Ctrl/Shift+slepen, twee vingers op een trackpad,
 toetsen `Q`/`E` of de draaiknoppen in het paneel (`R`/`F` kantelen, knop of kompas = noorden boven),
 scrollen = zoomen, pijltjes = verschuiven, klik op een pand = BAG-gegevens, `W` = wandelen (WASD/pijltjes,
@@ -74,6 +77,7 @@ bouwjaar, BGT-maquette in plaats van luchtfoto.
 | Bomen | Boomregister gemeente Haarlem (soort, leeftijd, kroonklasse) gekoppeld aan BGT-boompunten, plus automatische detectie in DSM-DTM | 1011 bomen met soort, 352 BGT-punten zonder soort, 6465 gedetecteerde tuinbomen (indicatief); hoogte uit AHN; klik op een boom voor soort en leeftijd |
 | Water, wegen, groen | Kadaster 3D Basisvoorziening 2025 (BGT-vlakken met hoogte) | water altijd zichtbaar; wegen/groen als "maquette"-laag |
 | Buurtgrens, straatnamen | CBS Wijken en Buurten 2025, BGT openbareruimtelabels | |
+| Omgeving (ring) | AHN DTM 5 m, luchtfoto 1,5 m/px, Kadaster LoD 1.2 (blokken), BGT-waterdelen | 6 × 6 km rond de wijk, grof en niet bevliegbaar: terrein met gat voor het werkgebied, ca. 40 duizend blokgebouwen met dakkleur uit de foto (schuurtjes onder 25 m² weggelaten), water op oeverhoogte; `build_context.py` |
 
 Coördinaten: RD New (EPSG:28992) met NAP-hoogtes, verschoven naar lokaal nulpunt RD (101800, 488600).
 In het model is x = oost, y = omhoog, z = zuid (glTF-conventie). Werkgebied RD 101100–102500 / 488000–489200.
@@ -109,7 +113,8 @@ Pipeline:
 5. `build_textures.py` – WebP-texturen per patch.
 6. `build_trees.py` – trees.glb (kronen, stammen en takkensilhouetten), trees.json en species.json.
 7. `build_misc.py` – buurtgrens.json, labels.json, scene.json.
-8. `optimize.sh` – terrein vereenvoudigen en meshopt-compressie (gltf-transform). `buildings.glb` blijft
+8. `build_context.py` – omgeving: context_terrain.glb en context_objects.glb (ring van 6 × 6 km).
+9. `optimize.sh` – terrein vereenvoudigen en meshopt-compressie (gltf-transform). `buildings.glb` blijft
    ongecomprimeerd omdat het `_BID`-attribuut exact moet blijven.
 
 ## Weer

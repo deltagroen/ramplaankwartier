@@ -10,6 +10,7 @@ echo "== 3/8 gebouwen";                 "$PY" pipeline/build_buildings.py
 echo "== 4/8 terrein";                  "$PY" pipeline/build_terrain.py
 echo "== 5/8 luchtfototexturen";        "$PY" pipeline/build_textures.py
 echo "== 6/8 bomen";                    "$PY" pipeline/build_trees.py
-echo "== 7/8 buurtgrens, labels, scene"; "$PY" pipeline/build_misc.py
-echo "== 8/8 optimaliseren (gltf-transform via npx)"; bash pipeline/optimize.sh
+echo "== 7/9 buurtgrens, labels, scene"; "$PY" pipeline/build_misc.py
+echo "== 8/9 omgeving (ring)";           "$PY" pipeline/build_context.py
+echo "== 9/9 optimaliseren (gltf-transform via npx)"; bash pipeline/optimize.sh
 echo "klaar: open de viewer met ./start.command (macOS) of start.bat (Windows)"
