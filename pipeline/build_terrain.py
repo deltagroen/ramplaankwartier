@@ -11,6 +11,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config as C
+import cityjson as CJ
 import terrain_common as T
 from glb import GLBWriter
 
@@ -32,6 +33,30 @@ def main():
     # normaal in RD-stelsel (-dh/dx, -dh/dy, 1) -> lokaal (x oost, y omhoog, z zuid)
     Nl = np.stack([-dHdx, np.ones_like(H), dHdy], axis=-1)
     Nl /= np.linalg.norm(Nl, axis=-1, keepdims=True)
+
+    # Brugdekken (en wegvlakken boven water) per patch, met dezelfde luchtfototextuur, op hun echte hoogte
+    decks = {}
+    dpath = C.WORK / "deck_faces.json"
+    if dpath.exists():
+        pw_ = (maxx - minx) / C.NX
+        ph_ = (maxy - miny) / C.NY
+        n_deck = 0
+        for d in json.loads(dpath.read_text()):
+            ring = np.asarray(d["ring3d"], dtype=np.float64)
+            if len(ring) < 3:
+                continue
+            cx, cy = ring[:, 0].mean(), ring[:, 1].mean()
+            if not (minx <= cx < maxx and miny <= cy < maxy):
+                continue
+            i, j = int((cx - minx) // pw_), int((cy - miny) // ph_)
+            tris, nrm = CJ.triangulate([list(range(len(ring)))], ring)
+            if tris is None:
+                continue
+            if nrm[2] < 0:
+                tris = tris[:, [0, 2, 1]]; nrm = -nrm
+            decks.setdefault((i, j), []).append((ring, tris, nrm))
+            n_deck += 1
+        print(f"brugdekken in terrein: {n_deck} vlakken")
 
     w = GLBWriter()
     pw = (maxx - minx) / C.NX
@@ -56,6 +81,17 @@ def main():
             Cc = D + 1
             tris = np.concatenate([np.stack([A, B, D], axis=-1).reshape(-1, 3),
                                    np.stack([B, Cc, D], axis=-1).reshape(-1, 3)])
+            if (i, j) in decks:                       # dekken toevoegen: eigen hoekpunten, uv uit de patch-bbox
+                P2, N2, UV2, I2 = [pos], [nrm], [uv], [tris]
+                base = len(pos)
+                for ring, dtris, dn in decks[(i, j)]:
+                    pts = np.stack([ring[:, 0] - C.ORIGIN[0], ring[:, 2] + 0.05, -(ring[:, 1] - C.ORIGIN[1])], axis=1)
+                    P2.append(pts)
+                    N2.append(np.tile([dn[0], dn[2], -dn[1]], (len(ring), 1)))
+                    UV2.append(np.stack([(ring[:, 0] - x0) / (x1 - x0), (y1 - ring[:, 1]) / (y1 - y0)], axis=1))
+                    I2.append(dtris + base)
+                    base += len(ring)
+                pos, nrm, uv, tris = np.vstack(P2), np.vstack(N2), np.vstack(UV2), np.vstack(I2)
             m = w.add_material(f"p{i}{j}", texture_uri=f"tex/p{i}{j}.webp", roughness=1.0)
             w.add_mesh(f"p{i}{j}", pos, tris, m, normals=nrm, uvs=uv, extras={"i": i, "j": j})
             total_tris += len(tris)

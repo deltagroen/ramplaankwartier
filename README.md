@@ -62,7 +62,7 @@ bouwjaar, BGT-maquette in plaats van luchtfoto.
 
 | Laag | Bron | Opmerking |
 |---|---|---|
-| Terrein | AHN DTM 0,5 m via PDOK WCS (actuele AHN; hier AHN5, gevlogen 2023) | 1 m-grid, vereenvoudigd tot ca. 0,8 M driehoeken, gaten gevuld, water ingebrand |
+| Terrein | AHN DTM 0,5 m via PDOK WCS (actuele AHN; hier AHN5, gevlogen 2023) | 1 m-grid, vereenvoudigd tot ca. 0,8 M driehoeken, gaten gevuld, water ingebrand; brugdekken en wegvlakken boven water uit de Kadaster-3D-vlakken als getextureerde driehoeken op hun echte hoogte |
 | Luchtfoto | Luchtfoto Beeldmateriaal NL 2026, 8 cm (PDOK WMS, laag `2026_orthoHR`) | 16 texturen van 2048², ingebed in terrain.glb |
 | Gebouwen | Kadaster 3D Basisvoorziening 2025, LoD 2.2 (CityJSON) | 2730 panden, met bouwjaar en BAG-id; dakkleur = mediaankleur van de luchtfoto binnen het dak; gevelkleur = schatting op bouwjaar, afmeting en dakkleur (zie hieronder); 1,5 m onder maaiveld doorgetrokken |
 | Bomen | Boomregister gemeente Haarlem (soort, leeftijd, kroonklasse) gekoppeld aan BGT-boompunten, plus automatische detectie in DSM-DTM | 1011 bomen met soort, 352 BGT-punten zonder soort, 6465 gedetecteerde tuinbomen (indicatief); hoogte uit AHN; klik op een boom voor soort en leeftijd |

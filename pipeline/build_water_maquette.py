@@ -107,7 +107,7 @@ def main():
     files = sorted(glob.glob(str(C.RAW / "kadaster3d" / "volledig_*.city.json")))
     acc = {name: Acc() for name in CLASSES.values()}
     water = Acc()
-    water_faces, bridge_faces, road_faces = [], [], []
+    water_faces, bridge_faces, road_faces, deck_faces, road3d = [], [], [], [], []
     stats, attr_stats = Counter(), Counter()
     for f in files:
         print("lezen", Path(f).name, flush=True)
@@ -161,6 +161,10 @@ def main():
                     ring = [[round(float(x), 2), round(float(y), 2)] for x, y in V[outer][:, :2]]
                     ring.append(ring[0])
                     bridge_faces.append({"ring": ring})
+                    deck_faces.append({"ring3d": [[round(float(x), 2), round(float(y), 2), round(float(z), 2)] for x, y, z in V[outer]], "type": "brug"})
+            if t == "Road":
+                for outer in rings_all:
+                    road3d.append([[round(float(x), 2), round(float(y), 2), round(float(z), 2)] for x, y, z in V[outer]])
             if t == "Road" and "rijbaan" in (a.get("bgt_functie") or "").lower():
                 for outer in rings_all:
                     ring = [[round(float(x), 2), round(float(y), 2)] for x, y in V[outer][:, :2]]
@@ -171,6 +175,24 @@ def main():
     for k, v in attr_stats.most_common(30):
         print("  ", v, k)
 
+    # Wegvlakken die boven water liggen (bruggen die als wegdeel zijn gemodelleerd) horen ook bij het dek
+    from shapely.geometry import Polygon as _Poly, Point as _Point
+    from shapely.strtree import STRtree
+    wpolys = [_Poly(f["ring"]).buffer(0.5) for f in water_faces if len(f["ring"]) >= 4]
+    wlevel = [f["z"] for f in water_faces if len(f["ring"]) >= 4]
+    tree = STRtree(wpolys) if wpolys else None
+    n_road_decks = 0
+    for ring in road3d:
+        if tree is None or len(ring) < 3:
+            continue
+        cx = sum(p[0] for p in ring) / len(ring); cy = sum(p[1] for p in ring) / len(ring); cz = sum(p[2] for p in ring) / len(ring)
+        pt = _Point(cx, cy)
+        for j in tree.query(pt):
+            if wpolys[j].contains(pt) and cz > wlevel[j] + 0.4:
+                deck_faces.append({"ring3d": ring, "type": "weg"}); n_road_decks += 1
+                break
+    print(f"brugdekken: {sum(1 for d in deck_faces if d['type'] == 'brug')} brugvlakken, {n_road_decks} wegvlakken boven water")
+    (C.WORK / "deck_faces.json").write_text(json.dumps(deck_faces))
     (C.WORK / "water_faces.json").write_text(json.dumps(water_faces))
     (C.WORK / "bridge_faces.json").write_text(json.dumps(bridge_faces))
     (C.WORK / "road_faces.json").write_text(json.dumps(road_faces))
