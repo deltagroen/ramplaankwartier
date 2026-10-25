@@ -40,7 +40,7 @@ middelpunt tot de grens (hooguit 30 m erbuiten), begin- en eindpunt 40–110 m e
 hooguit 60 m erbuiten; alleen corridors met beide einden binnen 40 m (water 150 m) van de grens komen in aanmerking. De camera kijkt vooruit, naar een punt 200 m verderop op de baan, zodat het hoofd
 meedraait in de richting waarin daarna gevlogen wordt (hoogstens 35 graden per seconde); de snelheid is constant,
 met vertraging in scherpe bochten en in de lage pas. Tijdens het vliegen zijn het paneel ingeklapt en de
-straatnamen uit. Elke muis- of toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het
+straatnamen uit en is de buurtgrens zichtbaar; na het stoppen komen de straatnamen pas na 5 s terug. Elke muis- of toetsactie stopt het afspelen; de knop "Dag afspelen" of de spatiebalk start het
 opnieuw.
 
 De bomen volgen het seizoen van de gekozen datum, per soort: uitlopen in april (fris lichtgroen, wilg en els
